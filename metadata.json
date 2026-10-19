@@ -1,0 +1,9 @@
+{
+  "name": "PlugMitra - Community EV Charging Network",
+  "description": "Peer-to-peer EV charging platform connecting EV owners with neighborhood chargers, parking slots, and hosts across Chennai.",
+  "prompt": "EV charging platform with interactive Leaflet map and charger registration",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
