@@ -207,7 +207,10 @@ export const AddChargerForm: React.FC<AddChargerFormProps> = ({ onSuccessNavigat
       if (!formData.area.trim()) errors.area = 'Locality / Area is required';
       if (!formData.pincode.trim()) errors.pincode = 'Chennai pincode is required';
       if (formData.latitude < 12.5 || formData.latitude > 13.5) {
-        errors.latitude = 'Latitude must be within the greater Chennai region';
+        errors.latitude = 'Latitude must be within the greater Chennai region (12.5°N - 13.5°N)';
+      }
+      if (formData.longitude < 79.8 || formData.longitude > 80.5) {
+        errors.longitude = 'Longitude must be within the greater Chennai region (79.8°E - 80.5°E)';
       }
     } else if (step === 3) {
       if (formData.powerOutputKw <= 0) errors.powerOutputKw = 'Power output must be greater than 0 kW';

@@ -60,6 +60,7 @@ export interface Database {
           created_at?: string;
           updated_at?: string;
         };
+        Relationships: [];
       };
       chargers: {
         Row: {
@@ -87,6 +88,7 @@ export interface Database {
           access_instructions: string | null;
           photo_paths: string[];
           status: ChargerStatusDb;
+          is_active: boolean;
           data_source: string;
           source_record_id: string | null;
           created_at: string;
@@ -94,7 +96,7 @@ export interface Database {
         };
         Insert: {
           id?: string;
-          owner_id: string;
+          owner_id?: string;
           name: string;
           property_name: string;
           parking_slot_number: string;
@@ -117,6 +119,7 @@ export interface Database {
           access_instructions?: string | null;
           photo_paths?: string[];
           status?: ChargerStatusDb;
+          is_active?: boolean;
           data_source?: string;
           source_record_id?: string | null;
           created_at?: string;
@@ -147,12 +150,124 @@ export interface Database {
           access_instructions?: string | null;
           photo_paths?: string[];
           status?: ChargerStatusDb;
+          is_active?: boolean;
           data_source?: string;
           source_record_id?: string | null;
           created_at?: string;
           updated_at?: string;
         };
+        Relationships: [];
+      };
+      saved_chargers: {
+        Row: {
+          user_id: string;
+          charger_id: string;
+          created_at: string;
+        };
+        Insert: {
+          user_id: string;
+          charger_id: string;
+          created_at?: string;
+        };
+        Update: {
+          user_id?: string;
+          charger_id?: string;
+          created_at?: string;
+        };
+        Relationships: [];
+      };
+      bookings: {
+        Row: {
+          id: string;
+          charger_id: string;
+          user_id: string;
+          driver_name: string;
+          driver_phone: string;
+          vehicle_details: string;
+          arrival_time: string;
+          duration_hours: number;
+          status: 'pending' | 'confirmed' | 'completed' | 'cancelled';
+          total_estimate: number;
+          notes: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          charger_id: string;
+          user_id: string;
+          driver_name: string;
+          driver_phone: string;
+          vehicle_details: string;
+          arrival_time: string;
+          duration_hours?: number;
+          status?: 'pending' | 'confirmed' | 'completed' | 'cancelled';
+          total_estimate?: number;
+          notes?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          charger_id?: string;
+          user_id?: string;
+          driver_name?: string;
+          driver_phone?: string;
+          vehicle_details?: string;
+          arrival_time?: string;
+          duration_hours?: number;
+          status?: 'pending' | 'confirmed' | 'completed' | 'cancelled';
+          total_estimate?: number;
+          notes?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
       };
     };
+    Views: {
+      v_public_chargers: {
+        Row: {
+          id: string;
+          owner_id: string;
+          name: string;
+          property_name: string;
+          address: string;
+          landmark: string | null;
+          area: string;
+          city: string;
+          pincode: string | null;
+          latitude: number;
+          longitude: number;
+          access_type: AccessTypeDb;
+          connector_types: string[];
+          power_output_kw: number;
+          power_type: PowerTypeDb;
+          is_covered_parking: boolean;
+          parking_slot_number: string;
+          is_free: boolean;
+          price_per_kwh: number | null;
+          parking_fee_per_hour: number;
+          operating_hours: string | null;
+          access_instructions: string | null;
+          photo_paths: string[];
+          status: ChargerStatusDb;
+          is_active: boolean;
+          data_source: string;
+          source_record_id: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Relationships: [];
+      };
+    };
+    Functions: Record<string, never>;
+    Enums: {
+      access_type_enum: AccessTypeDb;
+      charger_status_enum: ChargerStatusDb;
+      power_type_enum: PowerTypeDb;
+      user_role_enum: UserRoleDb;
+    };
+    CompositeTypes: Record<string, never>;
   };
 }

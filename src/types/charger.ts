@@ -26,6 +26,8 @@ export interface LocalPhoto {
   name: string;
   previewUrl: string;
   size: number;
+  file?: File;
+  isPrivate?: boolean;
 }
 
 export interface Charger {
@@ -62,6 +64,7 @@ export interface Charger {
   isResidential: boolean;
   isActive: boolean;
   isApproved: boolean;
+  status?: 'pending' | 'approved' | 'rejected';
 }
 
 export interface ChargerRegistrationFormData {

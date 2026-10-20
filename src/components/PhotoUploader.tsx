@@ -1,5 +1,5 @@
 import React, { useRef, useState } from 'react';
-import { UploadCloud, X, Image as ImageIcon, Eye, AlertCircle, Sparkles } from 'lucide-react';
+import { UploadCloud, X, Image as ImageIcon, Eye, AlertCircle, Sparkles, Lock, Globe, Shield } from 'lucide-react';
 import { LocalPhoto } from '../types/charger';
 
 interface PhotoUploaderProps {
@@ -50,6 +50,7 @@ export const PhotoUploader: React.FC<PhotoUploaderProps> = ({
         name: file.name,
         previewUrl,
         size: file.size,
+        file,
       });
     }
 
@@ -89,6 +90,17 @@ export const PhotoUploader: React.FC<PhotoUploaderProps> = ({
     // Revoke object URL
     URL.revokeObjectURL(previewUrl);
     const updated = photos.filter((p) => p.id !== id);
+    onPhotosChange(updated);
+  };
+
+  const togglePhotoPrivacy = (id: string) => {
+    const updated = photos.map((p, idx) => {
+      if (idx === 0) return p; // Cover photo is always public
+      if (p.id === id) {
+        return { ...p, isPrivate: !p.isPrivate };
+      }
+      return p;
+    });
     onPhotosChange(updated);
   };
 
@@ -141,6 +153,15 @@ export const PhotoUploader: React.FC<PhotoUploaderProps> = ({
         </div>
       </div>
 
+      {/* Privacy Shield Guidance */}
+      <div className="p-3 bg-amber-50/70 border border-amber-200/80 rounded-xl flex items-start gap-2.5 text-xs text-amber-950">
+        <Shield className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+        <div>
+          <span className="font-semibold text-amber-900">Residential Privacy Shield: </span>
+          Mark sensitive photos (gate code, personal driveway, private meter) as <span className="font-semibold text-amber-800">Private</span>. Private photos are isolated in protected storage and hidden from public explore cards.
+        </div>
+      </div>
+
       {errorMessage && (
         <div className="flex items-center gap-2 text-xs text-rose-600 bg-rose-50 border border-rose-200 p-2.5 rounded-xl">
           <AlertCircle className="w-4 h-4 shrink-0" />
@@ -153,9 +174,9 @@ export const PhotoUploader: React.FC<PhotoUploaderProps> = ({
         <div>
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-600">
-              Local Photo Previews ({photos.length})
+              Photo Previews ({photos.length})
             </span>
-            <span className="text-xs text-slate-400">First photo is used as the cover</span>
+            <span className="text-xs text-slate-400">Click photo privacy badge to toggle</span>
           </div>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
@@ -170,11 +191,35 @@ export const PhotoUploader: React.FC<PhotoUploaderProps> = ({
                   className="w-full h-full object-cover group-hover:scale-105 transition duration-300"
                 />
 
-                {/* Badge if Cover */}
-                {index === 0 && (
-                  <span className="absolute top-2 left-2 px-2 py-0.5 bg-brand-600/90 backdrop-blur-xs text-white text-[10px] font-bold rounded-md shadow-xs">
-                    Cover Photo
+                {/* Privacy Badge / Toggle */}
+                {index === 0 ? (
+                  <span className="absolute top-2 left-2 px-2 py-0.5 bg-forest-700/90 backdrop-blur-xs text-white text-[10px] font-bold rounded-md shadow-xs flex items-center gap-1">
+                    <Globe className="w-3 h-3" /> Cover (Public)
                   </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      togglePhotoPrivacy(photo.id);
+                    }}
+                    title="Click to toggle Public / Private"
+                    className={`absolute top-2 left-2 px-2 py-0.5 backdrop-blur-xs text-[10px] font-bold rounded-md shadow-xs flex items-center gap-1 transition cursor-pointer ${
+                      photo.isPrivate
+                        ? 'bg-amber-800/90 text-amber-100 hover:bg-amber-900 border border-amber-600'
+                        : 'bg-forest-700/90 text-white hover:bg-forest-800 border border-forest-600'
+                    }`}
+                  >
+                    {photo.isPrivate ? (
+                      <>
+                        <Lock className="w-3 h-3 text-amber-300" /> Private
+                      </>
+                    ) : (
+                      <>
+                        <Globe className="w-3 h-3 text-emerald-300" /> Public
+                      </>
+                    )}
+                  </button>
                 )}
 
                 {/* Hover overlay with Actions */}

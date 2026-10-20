@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import {
   LayoutDashboard,
@@ -12,7 +12,12 @@ import {
   Power,
   Trash2,
   ArrowRight,
-  Car
+  Car,
+  ShieldCheck,
+  CheckCircle2,
+  AlertCircle,
+  XCircle,
+  LogIn
 } from 'lucide-react';
 import { StorageService } from '../services/storage';
 import { ChargerService } from '../services/chargerService';
@@ -21,28 +26,33 @@ import { Charger, BookingRequest, UserProfile } from '../types/charger';
 import { ChargerDetailsModal } from '../components/ChargerDetailsModal';
 
 export const DashboardPage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'driver' | 'host'>('driver');
+  const [activeTab, setActiveTab] = useState<'driver' | 'host' | 'moderation'>('driver');
   const { user, profile, isAdmin, openAuthModal } = useAuth();
 
   const [savedChargers, setSavedChargers] = useState<Charger[]>([]);
   const [hostListings, setHostListings] = useState<Charger[]>([]);
+  const [pendingChargers, setPendingChargers] = useState<Charger[]>([]);
   const [bookings, setBookings] = useState<BookingRequest[]>([]);
   const [userProfile, setUserProfile] = useState<UserProfile>(StorageService.getUserProfile());
 
   const [selectedChargerForModal, setSelectedChargerForModal] = useState<Charger | null>(null);
   const [deleteConfirmationId, setDeleteConfirmationId] = useState<string | null>(null);
+  const [moderationMsg, setModerationMsg] = useState<{ id: string; text: string; type: 'success' | 'error' } | null>(null);
+  const [bookingActionMsg, setBookingActionMsg] = useState<string | null>(null);
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     setSavedChargers(StorageService.getSavedChargers());
     const userChargers = await ChargerService.getUserChargers(user);
     setHostListings(userChargers);
+    const pending = await ChargerService.getPendingChargers();
+    setPendingChargers(pending);
     setBookings(StorageService.getBookings());
     setUserProfile(StorageService.getUserProfile());
-  };
+  }, [user]);
 
   useEffect(() => {
     loadData();
-  }, [user]);
+  }, [loadData]);
 
   const handleToggleActive = (id: string, current: boolean) => {
     StorageService.updateChargerStatus(id, !current);
@@ -64,6 +74,26 @@ export const DashboardPage: React.FC = () => {
     StorageService.toggleSave(id);
     loadData();
   };
+
+  const handleApprovePending = async (chargerId: string) => {
+    const { error } = await ChargerService.updateApprovalStatus(chargerId, 'approved');
+    if (error) {
+      setModerationMsg({ id: chargerId, text: `Approval failed: ${error.message}`, type: 'error' });
+    } else {
+      setModerationMsg({ id: chargerId, text: 'Listing approved! Now discoverable on Chennai Explore map.', type: 'success' });
+      await loadData();
+    }
+  };
+
+  const handleRejectPending = async (chargerId: string) => {
+    const { error } = await ChargerService.updateApprovalStatus(chargerId, 'rejected');
+    if (error) {
+      setModerationMsg({ id: chargerId, text: `Rejection failed: ${error.message}`, type: 'error' });
+    } else {
+      setModerationMsg({ id: chargerId, text: 'Listing marked as rejected.', type: 'success' });
+      await loadData();
+    }
+  };
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
       {/* Page Title & Top Selector */}
@@ -81,7 +111,7 @@ export const DashboardPage: React.FC = () => {
           </p>
         </div>
 
-        {/* Tab Toggle: Driver Mode vs Host Mode */}
+        {/* Tab Toggle: Driver Mode vs Host Mode vs Admin Moderation */}
         <div className="inline-flex rounded-2xl bg-slate-100 p-1 border border-slate-200 self-start sm:self-auto text-xs font-bold shadow-2xs">
           <button
             type="button"
@@ -107,8 +137,65 @@ export const DashboardPage: React.FC = () => {
             <Building className="w-4 h-4 text-forest-700" />
             <span>Host / Owner Dashboard</span>
           </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('moderation')}
+            className={`px-4 py-2 rounded-xl transition flex items-center gap-2 ${
+              activeTab === 'moderation'
+                ? 'bg-white text-forest-900 shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <ShieldCheck className="w-4 h-4 text-emerald-600" />
+            <span>Admin Moderation</span>
+            {pendingChargers.length > 0 && (
+              <span className="px-1.5 py-0.2 bg-amber-500 text-white rounded-full text-[10px] font-bold">
+                {pendingChargers.length}
+              </span>
+            )}
+          </button>
         </div>
       </div>
+
+      {/* User Login / Profile Status Bar */}
+      {!user ? (
+        <div className="p-4 bg-amber-50 border border-amber-200 rounded-3xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+          <div className="flex items-center gap-2.5">
+            <AlertCircle className="w-5 h-5 text-amber-600 shrink-0" />
+            <div>
+              <span className="font-bold text-amber-950">Viewing Local Browser Session</span>
+              <p className="text-amber-800 text-[11px]">
+                Sign in to link charger registrations and bookings to your authenticated profile.
+              </p>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => openAuthModal('login')}
+            className="px-4 py-2 rounded-xl bg-forest-800 hover:bg-forest-900 text-white font-bold text-xs shrink-0 flex items-center gap-1.5 transition self-start sm:self-auto"
+          >
+            <LogIn className="w-4 h-4" />
+            <span>Sign In / Create Account</span>
+          </button>
+        </div>
+      ) : (
+        <div className="p-3.5 px-5 bg-white border border-slate-200/90 rounded-2xl flex flex-wrap items-center justify-between gap-3 text-xs shadow-2xs">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-forest-800 text-white flex items-center justify-center font-bold text-xs">
+              {(profile?.full_name || user.email || 'U')[0].toUpperCase()}
+            </div>
+            <div>
+              <span className="font-bold text-slate-900">{profile?.full_name || 'Community Member'}</span>
+              <span className="text-slate-500 text-[11px] block">{user.email}</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="px-2.5 py-0.5 rounded-full bg-forest-50 text-forest-800 border border-forest-200 text-[11px] font-semibold capitalize">
+              Role: {profile?.role || (isAdmin ? 'Admin' : 'Host')}
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* DRIVER DASHBOARD TAB */}
       {activeTab === 'driver' && (
@@ -460,6 +547,13 @@ export const DashboardPage: React.FC = () => {
               </span>
             </div>
 
+            {bookingActionMsg && (
+              <div className="p-3 bg-emerald-50 border border-emerald-300 rounded-2xl text-emerald-900 text-xs font-semibold flex items-center gap-2 animate-slide-up">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>{bookingActionMsg}</span>
+              </div>
+            )}
+
             <div className="p-4 bg-white rounded-2xl border border-slate-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div>
                 <div className="font-bold text-slate-900">
@@ -472,20 +566,154 @@ export const DashboardPage: React.FC = () => {
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => alert('Demo action: In a production deployment, this triggers an SMS/WhatsApp confirmation to the driver.')}
-                  className="px-3 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs"
+                  onClick={() => {
+                    setBookingActionMsg('Slot P-04 approved for Sanjay Kumar. Confirmation status updated.');
+                    setTimeout(() => setBookingActionMsg(null), 4000);
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs shadow-2xs transition"
                 >
                   Approve Slot
                 </button>
                 <button
                   type="button"
-                  onClick={() => alert('Demo action: Driver will be notified the slot is occupied.')}
-                  className="px-3 py-1.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-semibold"
+                  onClick={() => {
+                    setBookingActionMsg('Driver inquiry declined. Slot marked unavailable for requested slot.');
+                    setTimeout(() => setBookingActionMsg(null), 4000);
+                  }}
+                  className="px-3 py-1.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-semibold transition"
                 >
                   Decline
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ADMIN MODERATION TAB */}
+      {activeTab === 'moderation' && (
+        <div className="space-y-8 animate-fade-in">
+          {/* Moderation Banner */}
+          <div className="p-6 bg-slate-900 text-white rounded-3xl shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-950 text-emerald-300 border border-emerald-800 text-[10px] font-bold uppercase tracking-wider mb-2">
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>Listing Review & Safety Guard</span>
+              </div>
+              <h2 className="text-xl font-bold">
+                Community Charger Moderation Console
+              </h2>
+              <p className="text-xs text-slate-300 mt-1 max-w-xl">
+                Review newly registered community chargers, verify parking slots, and approve or reject submissions before they become publicly discoverable across Chennai.
+              </p>
+            </div>
+          </div>
+
+          {moderationMsg && (
+            <div
+              className={`p-4 rounded-2xl text-xs font-semibold flex items-center gap-2 animate-slide-up ${
+                moderationMsg.type === 'success'
+                  ? 'bg-emerald-50 border border-emerald-300 text-emerald-900'
+                  : 'bg-rose-50 border border-rose-300 text-rose-900'
+              }`}
+            >
+              {moderationMsg.type === 'success' ? (
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              ) : (
+                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
+              )}
+              <span>{moderationMsg.text}</span>
+            </div>
+          )}
+
+          {/* Pending Submissions List */}
+          <div className="space-y-4">
+            <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+              <Clock className="w-5 h-5 text-amber-600" />
+              <span>Pending Community Submissions ({pendingChargers.length})</span>
+            </h3>
+
+            {pendingChargers.length === 0 ? (
+              <div className="p-8 bg-white rounded-3xl border border-slate-200 text-center space-y-3">
+                <CheckCircle2 className="w-8 h-8 text-emerald-600 mx-auto" />
+                <p className="font-semibold text-slate-800 text-sm">All Submissions Moderated</p>
+                <p className="text-xs text-slate-500">
+                  There are currently no community chargers waiting for review. New listings will appear here.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {pendingChargers.map((ch) => (
+                  <div
+                    key={ch.id}
+                    className="p-5 bg-white rounded-3xl border border-slate-200 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-4"
+                  >
+                    <div className="space-y-1.5 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-amber-800 bg-amber-50 px-2 py-0.5 rounded border border-amber-200">
+                          ⏳ Status: Pending Review
+                        </span>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-forest-800 bg-forest-50 px-2 py-0.5 rounded border border-forest-200">
+                          {ch.area}
+                        </span>
+                        <span className="text-[10px] text-slate-500">
+                          Submitted on {new Date(ch.createdAt).toLocaleDateString()}
+                        </span>
+                      </div>
+
+                      <h4 className="font-bold text-base text-slate-900">{ch.title}</h4>
+                      <p className="text-xs text-slate-600">
+                        Property: <span className="font-semibold">{ch.propertyName}</span> · Parking Slot:{' '}
+                        <span className="font-mono font-bold text-forest-900 bg-forest-50 px-1.5 py-0.5 rounded border border-forest-200">
+                          {ch.parkingSlotNumber}
+                        </span>
+                      </p>
+                      <p className="text-xs text-slate-500">
+                        Address: {ch.address} {ch.landmark ? `(Landmark: ${ch.landmark})` : ''}
+                      </p>
+
+                      <div className="text-xs text-slate-500 flex flex-wrap gap-3 font-mono pt-1">
+                        <span>{ch.powerOutputKw} kW ({ch.powerType})</span>
+                        <span>•</span>
+                        <span>{ch.pricePerKwh ? `₹${ch.pricePerKwh}/kWh` : 'No tariff set'}</span>
+                        <span>•</span>
+                        <span>{ch.latitude.toFixed(4)}°N, {ch.longitude.toFixed(4)}°E</span>
+                        <span>•</span>
+                        <span>Access: {ch.accessType}</span>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2 shrink-0 pt-3 md:pt-0 border-t md:border-t-0 border-slate-100">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedChargerForModal(ch)}
+                        className="px-3.5 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-semibold transition"
+                      >
+                        Inspect Details
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleApprovePending(ch.id)}
+                        className="px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs shadow-2xs transition flex items-center gap-1.5"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>Approve Listing</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleRejectPending(ch.id)}
+                        className="px-3 py-2 rounded-xl border border-rose-200 text-rose-700 hover:bg-rose-50 text-xs font-semibold transition flex items-center gap-1"
+                      >
+                        <XCircle className="w-3.5 h-3.5" />
+                        <span>Reject</span>
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}

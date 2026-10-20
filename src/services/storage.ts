@@ -304,7 +304,7 @@ export const StorageService = {
     return list.find((c) => c.id === id);
   },
 
-  saveNewCharger(formData: ChargerRegistrationFormData): Charger {
+  saveNewCharger(formData: ChargerRegistrationFormData, isApproved: boolean = false): Charger {
     const chargers = this.getChargers();
     const newCharger: Charger = {
       id: `ch-user-${Date.now()}`,
@@ -334,12 +334,13 @@ export const StorageService = {
       specialInstructions: formData.specialInstructions.trim(),
       photos: formData.photos.map((p) => p.previewUrl),
       listingSource: 'Community Host',
-      verificationStatus: 'Host Self-Reported',
+      verificationStatus: isApproved ? 'Community Verified' : 'Host Self-Reported',
       createdAt: new Date().toISOString(),
       isUserCreated: true,
       isResidential: formData.accessType.includes('House') || formData.accessType.includes('Apartment'),
-      isActive: true,
-      isApproved: true,
+      isActive: isApproved,
+      isApproved: isApproved,
+      status: isApproved ? 'approved' : 'pending',
     };
 
     const updated = [newCharger, ...chargers];
@@ -351,6 +352,23 @@ export const StorageService = {
     const list = this.getChargers().map((c) => {
       if (c.id === id) {
         return { ...c, isActive };
+      }
+      return c;
+    });
+    localStorage.setItem(STORAGE_KEYS.CHARGERS, JSON.stringify(list));
+  },
+
+  updateChargerApproval(id: string, status: 'approved' | 'rejected'): void {
+    const list = this.getChargers().map((c) => {
+      if (c.id === id) {
+        const approved = status === 'approved';
+        return {
+          ...c,
+          isApproved: approved,
+          isActive: approved,
+          status,
+          verificationStatus: (approved ? 'Community Verified' : c.verificationStatus) as Charger['verificationStatus'],
+        };
       }
       return c;
     });

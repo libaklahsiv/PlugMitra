@@ -6,9 +6,7 @@ import {
   CheckCircle2,
   RotateCcw,
   ShieldCheck,
-  AlertTriangle,
-  LogIn,
-  Database
+  AlertTriangle
 } from 'lucide-react';
 import { StorageService } from '../services/storage';
 import { UserProfile, ChargerType } from '../types/charger';
@@ -105,6 +103,27 @@ export const ProfilePage: React.FC = () => {
           Configure your electric vehicle specifications to personalize charger compatibility and parking slot recommendations.
         </p>
       </div>
+
+      {/* Authentication & Cloud Sync Banner */}
+      {!user && (
+        <div className="p-4 bg-amber-50 border border-amber-200 rounded-2xl text-xs text-amber-900 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <span className="font-bold block">Local Browser Profile</span>
+            <span className="text-[11px] text-amber-800">
+              {isConfigured
+                ? 'Sign in with your PlugMitra account to sync your vehicle details to the cloud.'
+                : 'Preferences are currently saved in your browser storage.'}
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => openAuthModal('login')}
+            className="px-4 py-2 bg-forest-800 hover:bg-forest-900 text-white rounded-xl font-bold text-xs shrink-0 self-start sm:self-auto transition"
+          >
+            Sign In / Register
+          </button>
+        </div>
+      )}
 
       {saveSuccess && (
         <div className="p-4 bg-emerald-50 border border-emerald-300 rounded-2xl text-emerald-900 text-xs font-semibold flex items-center gap-2 animate-slide-up">
@@ -295,10 +314,11 @@ export const ProfilePage: React.FC = () => {
 
           <button
             type="submit"
-            className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-forest-800 hover:bg-forest-900 text-white font-bold text-xs shadow-xs transition flex items-center justify-center gap-2 order-1 sm:order-2"
+            disabled={isSaving}
+            className="w-full sm:w-auto px-6 py-2.5 rounded-xl bg-forest-800 hover:bg-forest-900 text-white font-bold text-xs shadow-xs transition flex items-center justify-center gap-2 order-1 sm:order-2 disabled:opacity-50"
           >
             <Save className="w-4 h-4 text-emerald-300" />
-            <span>Save Preferences</span>
+            <span>{isSaving ? 'Saving...' : 'Save Preferences'}</span>
           </button>
         </div>
       </form>
