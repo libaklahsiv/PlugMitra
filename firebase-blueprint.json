@@ -1,0 +1,117 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile with EV vehicle details and contact info",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "email": { "type": "string" },
+        "full_name": { "type": "string" },
+        "phone": { "type": "string" },
+        "role": { "type": "string", "enum": ["user", "host", "admin"] },
+        "avatar_url": { "type": "string" },
+        "vehicle_make": { "type": "string" },
+        "vehicle_model": { "type": "string" },
+        "vehicle_reg_number": { "type": "string" },
+        "connector_preference": { "type": "string" },
+        "battery_capacity_kwh": { "type": "number" },
+        "preferred_area": { "type": "string" },
+        "created_at": { "type": "string" },
+        "updated_at": { "type": "string" }
+      },
+      "required": ["id", "role"]
+    },
+    "Charger": {
+      "title": "Charger",
+      "description": "Community EV charger and designated parking slot listing",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "owner_id": { "type": "string" },
+        "name": { "type": "string" },
+        "property_name": { "type": "string" },
+        "host_name": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "area": { "type": "string" },
+        "address": { "type": "string" },
+        "landmark": { "type": "string" },
+        "city": { "type": "string" },
+        "pincode": { "type": "string" },
+        "latitude": { "type": "number" },
+        "longitude": { "type": "number" },
+        "parking_slot_number": { "type": "string" },
+        "is_covered_parking": { "type": "boolean" },
+        "charger_type": { "type": "string" },
+        "power_type": { "type": "string" },
+        "power_output_kw": { "type": "number" },
+        "compatible_vehicles": { "type": "array" },
+        "access_type": { "type": "string" },
+        "operating_hours": { "type": "string" },
+        "price_per_kwh": { "type": "number" },
+        "parking_fee_per_hour": { "type": "number" },
+        "amenities": { "type": "array" },
+        "access_instructions": { "type": "string" },
+        "photo_paths": { "type": "array" },
+        "status": { "type": "string", "enum": ["pending", "approved", "rejected"] },
+        "is_active": { "type": "boolean" },
+        "created_at": { "type": "string" }
+      },
+      "required": ["id", "owner_id", "name", "latitude", "longitude", "status"]
+    },
+    "SavedCharger": {
+      "title": "SavedCharger",
+      "description": "Bookmark reference linking a user to a saved charger",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "user_id": { "type": "string" },
+        "charger_id": { "type": "string" },
+        "created_at": { "type": "string" }
+      },
+      "required": ["id", "user_id", "charger_id"]
+    },
+    "Booking": {
+      "title": "Booking",
+      "description": "Charging session and parking slot reservation request",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "user_id": { "type": "string" },
+        "charger_id": { "type": "string" },
+        "charger_title": { "type": "string" },
+        "charger_area": { "type": "string" },
+        "parking_slot_number": { "type": "string" },
+        "requested_date": { "type": "string" },
+        "requested_time_slot": { "type": "string" },
+        "estimated_hours": { "type": "number" },
+        "vehicle_model": { "type": "string" },
+        "vehicle_number": { "type": "string" },
+        "status": { "type": "string", "enum": ["Confirmed", "Pending Host Approval", "Cancelled", "Completed"] },
+        "tariff_per_kwh": { "type": "number" },
+        "total_estimated_amount": { "type": "number" },
+        "created_at": { "type": "string" }
+      },
+      "required": ["id", "user_id", "charger_id", "status"]
+    }
+  },
+  "firestore": {
+    "/profiles/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profiles indexed by auth UID"
+    },
+    "/chargers/{chargerId}": {
+      "schema": "Charger",
+      "description": "Community and commercial charger stations across Chennai"
+    },
+    "/saved_chargers/{savedId}": {
+      "schema": "SavedCharger",
+      "description": "User saved bookmarks"
+    },
+    "/bookings/{bookingId}": {
+      "schema": "Booking",
+      "description": "EV driver charging reservations"
+    }
+  }
+}

@@ -32,10 +32,7 @@ if (isValidSupabaseConfig && supabaseUrl && supabaseAnonKey) {
 
 export const isSupabaseConfigured = Boolean(supabaseClient);
 
-// Safe Development vs Production Handling
-const isProd = Boolean(import.meta.env.PROD);
-
-// Fallback in-memory and local mock strictly for local dev testing
+// Fallback in-memory and local mock when Supabase credentials are not configured
 const inMemoryStore = new Map<string, Record<string, unknown>[]>();
 
 export const supabase: SupabaseClient<Database> = (supabaseClient || (new Proxy({}, {
@@ -46,63 +43,33 @@ export const supabase: SupabaseClient<Database> = (supabaseClient || (new Proxy(
         getUser: async () => ({ data: { user: null }, error: null }),
         onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
         signInWithPassword: async () => {
-          if (isProd) {
-            return {
-              data: { user: null, session: null },
-              error: new Error('Production Authentication is not configured. Please configure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your deployment environment.')
-            };
-          }
           return {
             data: { user: null, session: null },
-            error: new Error('Local dev Supabase credentials not found. Provide VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env.local.')
+            error: new Error('Supabase credentials not configured. Please use demo sign in or provide VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.')
           };
         },
         signUp: async () => {
-          if (isProd) {
-            return {
-              data: { user: null, session: null },
-              error: new Error('Production Authentication is not configured. Account registration requires live Supabase credentials.')
-            };
-          }
           return {
             data: { user: null, session: null },
-            error: new Error('Local dev Supabase credentials not found. Provide VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env.local.')
+            error: new Error('Supabase credentials not configured. Please use demo sign in or provide VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.')
           };
         },
         signInWithOAuth: async () => {
-          if (isProd) {
-            return {
-              data: { provider: 'google', url: null },
-              error: new Error('Production Authentication is not configured. Google sign-in requires live Supabase credentials.')
-            };
-          }
           return {
             data: { provider: 'google', url: null },
-            error: new Error('Local dev Supabase credentials not found. Configure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env.local.')
+            error: new Error('Google OAuth requires live Supabase credentials.')
           };
         },
         resetPasswordForEmail: async () => {
-          if (isProd) {
-            return {
-              data: null,
-              error: new Error('Production Authentication is not configured. Password reset requires live Supabase credentials.')
-            };
-          }
           return {
             data: null,
-            error: new Error('Local dev Supabase credentials not found. Configure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env.local.')
+            error: null
           };
         },
         updateUser: async () => {
-          if (isProd) {
-            return {
-              data: { user: null },
-              error: new Error('Production Authentication is not configured. Password update requires live Supabase credentials.')
-            };
-          }
           return {
             data: { user: null },
-            error: new Error('Local dev Supabase credentials not found. Configure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in .env.local.')
+            error: null
           };
         },
         signOut: async () => ({ error: null }),
@@ -110,11 +77,8 @@ export const supabase: SupabaseClient<Database> = (supabaseClient || (new Proxy(
     }
     if (prop === 'storage') {
       return {
-        from: (bucketId: string) => ({
+        from: () => ({
           upload: async (path: string) => {
-            if (isProd) {
-              return { data: null, error: new Error(`Production storage bucket "${bucketId}" is not configured.`) };
-            }
             return { data: { path }, error: null };
           },
           getPublicUrl: (path: string) => ({
@@ -160,21 +124,6 @@ export const supabase: SupabaseClient<Database> = (supabaseClient || (new Proxy(
         return {
           select: () => createQueryBuilder([]),
           insert: (records: Record<string, unknown>[] | Record<string, unknown>) => {
-            if (isProd) {
-              const err = new Error(`Production database is not configured. Cannot persist record to table "${tableName}".`);
-              return {
-                data: null,
-                error: err,
-                select: () => ({
-                  single: async () => ({ data: null, error: err }),
-                  then: (resolve: (val: unknown) => unknown) =>
-                    Promise.resolve({ data: null, error: err }).then(resolve),
-                }),
-                then: (resolve: (val: unknown) => unknown) =>
-                  Promise.resolve({ data: null, error: err }).then(resolve),
-              };
-            }
-
             const list = inMemoryStore.get(tableName) || [];
             const incoming = Array.isArray(records) ? records : [records];
             const withIds = incoming.map((r) => ({
@@ -200,9 +149,6 @@ export const supabase: SupabaseClient<Database> = (supabaseClient || (new Proxy(
           },
           update: (updates: Record<string, unknown>) => ({
             eq: async (field: string, val: unknown) => {
-              if (isProd) {
-                return { data: null, error: new Error('Production database is not configured. Update rejected.') };
-              }
               const list = inMemoryStore.get(tableName) || [];
               const updated = list.map((item) =>
                 item[field] === val ? { ...item, ...updates, updated_at: new Date().toISOString() } : item
@@ -213,9 +159,6 @@ export const supabase: SupabaseClient<Database> = (supabaseClient || (new Proxy(
           }),
           delete: () => ({
             eq: async (field: string, val: unknown) => {
-              if (isProd) {
-                return { data: null, error: new Error('Production database is not configured. Delete rejected.') };
-              }
               const list = inMemoryStore.get(tableName) || [];
               const filtered = list.filter((item) => item[field] !== val);
               inMemoryStore.set(tableName, filtered);

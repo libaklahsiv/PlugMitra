@@ -1,14 +1,25 @@
-import { supabase, isSupabaseConfigured } from './supabase';
+import {
+  collection,
+  doc,
+  getDocs,
+  setDoc,
+  updateDoc,
+  deleteDoc,
+  query,
+  where,
+} from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { db, storage } from './firebase';
 import { StorageService } from './storage';
 import {
   Charger,
   ChargerRegistrationFormData,
-  AccessType
+  AccessType,
 } from '../types/charger';
-import { AccessTypeDb, ChargerStatusDb, Database } from '../types/supabase';
-import { User } from '@supabase/supabase-js';
+import { AccessTypeDb, ChargerStatusDb } from '../types/supabase';
+import { AppUser } from '../context/AuthContext';
 
-// Map UI access types to database enum: 'public' | 'semi-private' | 'private'
+// Map UI access types to database string: 'public' | 'semi-private' | 'private'
 export function mapAccessTypeToDb(accessType: AccessType): AccessTypeDb {
   if (accessType.includes('Independent House') || accessType.includes('Villa')) {
     return 'private';
@@ -30,163 +41,145 @@ export function mapDbToUiAccessType(accessTypeDb: AccessTypeDb): AccessType {
 }
 
 export const ChargerService = {
-  // Fetch all approved chargers for the Explore page via the privacy-enforced view
+  // Fetch all approved chargers for the Explore page
   async getApprovedChargers(): Promise<Charger[]> {
     const fallbackChargers = StorageService.getChargers().filter(
       (c) => c.isApproved === true && c.status !== 'pending' && c.status !== 'rejected' && c.isActive !== false
     );
 
-    if (!isSupabaseConfigured) {
-      // In production with unconfigured database, fail safely
-      if (import.meta.env.PROD) {
-        console.warn('[PlugMitra] Supabase not configured in production mode.');
-        return [];
+    try {
+      const chargersColl = collection(db, 'chargers');
+      const q = query(chargersColl, where('status', '==', 'approved'));
+      const snap = await getDocs(q);
+
+      if (!snap.empty) {
+        const firestoreList: Charger[] = [];
+        snap.forEach((docSnap) => {
+          const d = docSnap.data();
+          firestoreList.push({
+            id: docSnap.id,
+            ownerId: d.owner_id || d.ownerId,
+            title: d.name || d.title,
+            propertyName: d.property_name || d.propertyName,
+            hostName: d.host_name || d.hostName || 'Community Host',
+            area: d.area || 'Chennai',
+            address: d.address || '',
+            landmark: d.landmark || undefined,
+            city: d.city || 'Chennai',
+            pincode: d.pincode || '600020',
+            latitude: Number(d.latitude),
+            longitude: Number(d.longitude),
+            parkingSlotNumber: d.parking_slot_number || d.parkingSlotNumber || 'Slot 1',
+            isCoveredParking: Boolean(d.is_covered_parking ?? d.isCoveredParking),
+            chargerType: (d.connector_types?.[0] || d.chargerType) as Charger['chargerType'],
+            powerType: d.power_type || d.powerType || 'AC',
+            powerOutputKw: Number(d.power_output_kw || d.powerOutputKw || 7.4),
+            compatibleVehicles: d.compatible_vehicles || d.compatibleVehicles || ['4-Wheeler', '2-Wheeler'],
+            accessType: mapDbToUiAccessType(d.access_type || 'public'),
+            operatingHours: d.operating_hours || d.operatingHours || null,
+            pricePerKwh: d.price_per_kwh != null ? Number(d.price_per_kwh) : null,
+            parkingFeePerHour: Number(d.parking_fee_per_hour || 0),
+            amenities: d.amenities || ['cctv', 'lit', 'covered'],
+            specialInstructions: d.access_instructions || d.specialInstructions || '',
+            photos: d.photo_paths || d.photos || [],
+            listingSource: d.listing_source || 'Community Host',
+            verificationStatus: 'Community Verified',
+            createdAt: d.created_at || new Date().toISOString(),
+            isResidential: d.access_type === 'private',
+            isActive: true,
+            isApproved: true,
+            status: 'approved',
+          });
+        });
+
+        // Merge with initial chargers so full Chennai map is populated
+        const existingIds = new Set(firestoreList.map((c) => c.id));
+        const combined = [...firestoreList];
+        for (const fb of fallbackChargers) {
+          if (!existingIds.has(fb.id)) {
+            combined.push(fb);
+          }
+        }
+        return combined;
       }
       return fallbackChargers;
-    }
-
-    try {
-      // Query the privacy masking view v_public_chargers
-      // Query the privacy masking view v_public_chargers
-      // This strictly enforces residential address and gate code masking at the database level
-      const { data, error } = await supabase
-        .from('v_public_chargers')
-        .select('*')
-        .eq('status', 'approved')
-        .eq('is_active', true)
-        .order('created_at', { ascending: false });
-
-      if (error) {
-        console.warn('[PlugMitra] Supabase query error, falling back to local storage:', error.message);
-        return fallbackChargers;
-      }
-
-      if (data && data.length > 0) {
-        const rows = data as unknown as Database['public']['Views']['v_public_chargers']['Row'][];
-        const mappedFromDb: Charger[] = rows.map((row) => ({
-          id: row.id,
-          ownerId: row.owner_id,
-          title: row.name,
-          propertyName: row.property_name,
-          hostName: row.data_source === 'imported' ? 'Public Station Host' : 'Verified Community Host',
-          area: row.area,
-          address: row.address,
-          landmark: row.landmark || undefined,
-          city: row.city,
-          pincode: row.pincode || '600020',
-          latitude: row.latitude,
-          longitude: row.longitude,
-          parkingSlotNumber: row.parking_slot_number,
-          isCoveredParking: row.is_covered_parking,
-          chargerType: (row.connector_types?.[0] as Charger['chargerType']) || 'Type 2 AC (Fast AC, up to 22 kW)',
-          powerType: row.power_type,
-          powerOutputKw: Number(row.power_output_kw),
-          compatibleVehicles: ['4-Wheeler', '2-Wheeler'],
-          accessType: mapDbToUiAccessType(row.access_type),
-          operatingHours: row.operating_hours,
-          pricePerKwh: row.price_per_kwh ? Number(row.price_per_kwh) : null,
-          parkingFeePerHour: Number(row.parking_fee_per_hour || 0),
-          amenities: ['cctv', 'lit', 'covered'],
-          specialInstructions: row.access_instructions || '',
-          photos: (row.photo_paths || []).filter((p: string) => !p.includes('/private/')), // sanitized public photos only
-          listingSource: row.data_source === 'imported' ? 'Public Utility' : 'Community Host',
-          verificationStatus: 'Community Verified',
-          createdAt: row.created_at,
-          isResidential: row.access_type === 'private',
-          isActive: row.is_active ?? true,
-          isApproved: true,
-          status: 'approved',
-        }));
-
-        return mappedFromDb;
-      }
-
-      return import.meta.env.PROD ? [] : fallbackChargers;
     } catch (err) {
-      console.warn('[PlugMitra] Database connection failed:', err);
-      return import.meta.env.PROD ? [] : fallbackChargers;
+      console.warn('[PlugMitra] Firestore read error, using local fallback:', err);
+      return fallbackChargers;
     }
   },
 
   // Fetch host's own chargers (pending, approved, or rejected)
-  async getUserChargers(user: User | null): Promise<Charger[]> {
+  async getUserChargers(user: AppUser | null): Promise<Charger[]> {
     if (!user) return [];
 
     const localUserCreated = StorageService.getChargers().filter(
       (c) => c.ownerId === user.id || (c.isUserCreated && !c.ownerId)
     );
 
-    if (!isSupabaseConfigured) {
-      return localUserCreated;
-    }
-
     try {
-      const { data, error } = await supabase
-        .from('chargers')
-        .select('*')
-        .eq('owner_id', user.id)
-        .order('created_at', { ascending: false });
+      const chargersColl = collection(db, 'chargers');
+      const q = query(chargersColl, where('owner_id', '==', user.id));
+      const snap = await getDocs(q);
 
-      if (error) {
-        console.warn('Failed to fetch user chargers from Supabase:', error.message);
-        return localUserCreated;
+      if (!snap.empty) {
+        const list: Charger[] = [];
+        snap.forEach((docSnap) => {
+          const d = docSnap.data();
+          list.push({
+            id: docSnap.id,
+            ownerId: d.owner_id,
+            title: d.name || d.title,
+            propertyName: d.property_name || d.propertyName,
+            hostName: user.displayName || user.user_metadata?.full_name || 'Community Host',
+            email: user.email || undefined,
+            area: d.area,
+            address: d.address,
+            landmark: d.landmark || undefined,
+            city: d.city,
+            pincode: d.pincode,
+            latitude: Number(d.latitude),
+            longitude: Number(d.longitude),
+            parkingSlotNumber: d.parking_slot_number,
+            isCoveredParking: Boolean(d.is_covered_parking),
+            chargerType: (d.connector_types?.[0] || d.chargerType) as Charger['chargerType'],
+            powerType: d.power_type,
+            powerOutputKw: Number(d.power_output_kw),
+            compatibleVehicles: d.compatible_vehicles || ['4-Wheeler', '2-Wheeler'],
+            accessType: mapDbToUiAccessType(d.access_type),
+            operatingHours: d.operating_hours,
+            pricePerKwh: d.price_per_kwh != null ? Number(d.price_per_kwh) : null,
+            parkingFeePerHour: Number(d.parking_fee_per_hour || 0),
+            amenities: d.amenities || ['cctv', 'lit', 'covered'],
+            specialInstructions: d.access_instructions || '',
+            photos: d.photo_paths || [],
+            listingSource: 'Community Host',
+            verificationStatus: d.status === 'approved' ? 'Community Verified' : 'Host Self-Reported',
+            createdAt: d.created_at,
+            isResidential: d.access_type === 'private',
+            isActive: d.status === 'approved',
+            isApproved: d.status === 'approved',
+            isUserCreated: true,
+            status: d.status,
+          });
+        });
+        return list;
       }
-
-      if (data) {
-        return data.map((row) => ({
-          id: row.id,
-          ownerId: row.owner_id,
-          title: row.name,
-          propertyName: row.property_name,
-          hostName: user.user_metadata?.full_name || 'Community Host',
-          email: user.email,
-          area: row.area,
-          address: row.address,
-          landmark: row.landmark || undefined,
-          city: row.city,
-          pincode: row.pincode || '600020',
-          latitude: row.latitude,
-          longitude: row.longitude,
-          parkingSlotNumber: row.parking_slot_number,
-          isCoveredParking: row.is_covered_parking,
-          chargerType: (row.connector_types?.[0] as Charger['chargerType']) || 'Type 2 AC (Fast AC, up to 22 kW)',
-          powerType: row.power_type,
-          powerOutputKw: Number(row.power_output_kw),
-          compatibleVehicles: ['4-Wheeler', '2-Wheeler'],
-          accessType: mapDbToUiAccessType(row.access_type),
-          operatingHours: row.operating_hours,
-          pricePerKwh: row.price_per_kwh ? Number(row.price_per_kwh) : null,
-          parkingFeePerHour: Number(row.parking_fee_per_hour || 0),
-          amenities: ['cctv', 'lit', 'covered'],
-          specialInstructions: row.access_instructions || '',
-          photos: row.photo_paths || [],
-          listingSource: 'Community Host',
-          verificationStatus: row.status === 'approved' ? 'Community Verified' : 'Host Self-Reported',
-          createdAt: row.created_at,
-          isResidential: row.access_type === 'private',
-          isActive: row.status === 'approved',
-          isApproved: row.status === 'approved',
-          isUserCreated: true,
-          status: row.status,
-        }));
-      }
-
       return localUserCreated;
     } catch {
       return localUserCreated;
     }
   },
 
-  // Save new listing directly to Supabase with 'pending' status
+  // Save new listing directly to Firebase with 'pending' status
   async registerCharger(
     formData: ChargerRegistrationFormData,
-    user: User | null
+    user: AppUser | null
   ): Promise<{ data: Charger | null; error: Error | null }> {
     if (!user) {
       return { data: null, error: new Error('You must be signed in to list a charger. Please sign in or create an account.') };
     }
 
-    // Required field validation before DB submission
     if (!formData.title?.trim()) {
       return { data: null, error: new Error('Listing title is required.') };
     }
@@ -210,213 +203,143 @@ export const ChargerService = {
     const priceNum = formData.pricePerKwh ? parseFloat(formData.pricePerKwh) : null;
     const parkingFeeNum = formData.parkingFeePerHour ? parseFloat(formData.parkingFeePerHour) : 0;
 
-    let photoPaths = formData.photos.map((p) => p.previewUrl);
-
-    if (isSupabaseConfigured) {
-      try {
-        // Upload photo files to Supabase Storage if available
-        const uploadedPaths: string[] = [];
-        for (const p of formData.photos) {
-          if (p.file) {
-            try {
-              const isPrivate = p.isPrivate ?? (accessTypeDb === 'private' && uploadedPaths.length > 0);
-              const folder = isPrivate ? 'private' : 'public';
-              const cleanName = p.file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
-              const storagePath = `${user.id}/${folder}/${Date.now()}_${cleanName}`;
-              const { error: uploadErr } = await supabase.storage
-                .from('charger-photos')
-                .upload(storagePath, p.file, { upsert: true });
-
-              if (!uploadErr) {
-                const { data: urlData } = supabase.storage
-                  .from('charger-photos')
-                  .getPublicUrl(storagePath);
-                uploadedPaths.push(urlData?.publicUrl || storagePath);
-              } else {
-                uploadedPaths.push(p.previewUrl);
-              }
-            } catch {
-              uploadedPaths.push(p.previewUrl);
-            }
-          } else {
-            uploadedPaths.push(p.previewUrl);
-          }
+    // Upload photo files to Firebase Storage if available
+    const uploadedPaths: string[] = [];
+    for (const p of formData.photos) {
+      if (p.file) {
+        try {
+          const isPrivate = p.isPrivate ?? false;
+          const folder = isPrivate ? 'private' : 'public';
+          const cleanName = p.file.name.replace(/[^a-zA-Z0-9.-]/g, '_');
+          const fileRef = ref(storage, `charger-photos/${user.id}/${folder}/${Date.now()}_${cleanName}`);
+          await uploadBytes(fileRef, p.file);
+          const downloadUrl = await getDownloadURL(fileRef);
+          uploadedPaths.push(downloadUrl);
+        } catch {
+          uploadedPaths.push(p.previewUrl);
         }
-        if (uploadedPaths.length > 0) {
-          photoPaths = uploadedPaths;
-        }
-
-        const dbPayload = {
-          owner_id: user.id,
-          name: formData.title.trim(),
-          property_name: formData.propertyName.trim(),
-          parking_slot_number: formData.parkingSlotNumber.trim(),
-          is_covered_parking: formData.isCoveredParking,
-          address: formData.address.trim(),
-          landmark: formData.landmark?.trim() || null,
-          area: formData.area.trim() || 'Chennai',
-          city: formData.city?.trim() || 'Chennai',
-          pincode: formData.pincode?.trim() || '600020',
-          latitude: formData.latitude,
-          longitude: formData.longitude,
-          access_type: accessTypeDb,
-          connector_types: [formData.chargerType],
-          power_output_kw: formData.powerOutputKw,
-          power_type: formData.powerType,
-          is_free: priceNum === 0,
-          price_per_kwh: priceNum,
-          parking_fee_per_hour: parkingFeeNum,
-          operating_hours: formData.operatingHours?.trim() || null,
-          access_instructions: formData.specialInstructions?.trim() || null,
-          photo_paths: photoPaths,
-          status: 'pending' as ChargerStatusDb, // Guaranteed pending status on submission
-          data_source: 'community',
-        };
-
-        const { data, error } = await supabase
-          .from('chargers')
-          .insert(dbPayload)
-          .select()
-          .single();
-
-        if (error) {
-          return { data: null, error: new Error(`Database error: ${error.message}`) };
-        }
-
-        // Return successfully saved charger
-        const newCharger: Charger = {
-          id: data.id,
-          ownerId: data.owner_id,
-          title: data.name,
-          propertyName: data.property_name,
-          hostName: user.user_metadata?.full_name || formData.hostName,
-          phone: formData.phone,
-          email: user.email,
-          area: data.area,
-          address: data.address,
-          landmark: data.landmark || undefined,
-          city: data.city,
-          pincode: data.pincode || '600020',
-          latitude: data.latitude,
-          longitude: data.longitude,
-          parkingSlotNumber: data.parking_slot_number,
-          isCoveredParking: data.is_covered_parking,
-          chargerType: formData.chargerType,
-          powerType: data.power_type,
-          powerOutputKw: Number(data.power_output_kw),
-          compatibleVehicles: formData.compatibleVehicles,
-          accessType: formData.accessType,
-          operatingHours: data.operating_hours,
-          pricePerKwh: data.price_per_kwh ? Number(data.price_per_kwh) : null,
-          parkingFeePerHour: Number(data.parking_fee_per_hour),
-          amenities: formData.amenities,
-          specialInstructions: data.access_instructions || '',
-          photos: data.photo_paths,
-          listingSource: 'Community Host',
-          verificationStatus: 'Host Self-Reported',
-          createdAt: data.created_at,
-          isResidential: data.access_type === 'private',
-          isActive: false, // Pending approval
-          isApproved: false,
-          isUserCreated: true,
-          status: 'pending',
-        };
-
-        // Cache in local storage for host dashboard tracking (with pending status)
-        StorageService.saveNewCharger(
-          { ...formData, photos: formData.photos.map((p, idx) => ({ ...p, previewUrl: photoPaths[idx] || p.previewUrl })) },
-          false,
-          user.id
-        );
-        return { data: newCharger, error: null };
-      } catch (err: unknown) {
-        return { data: null, error: err as Error };
+      } else {
+        uploadedPaths.push(p.previewUrl);
       }
-    } else {
-      // Production fail-safe: Never simulate saved persistence in production when Supabase is not configured
-      if (import.meta.env.PROD) {
-        return {
-          data: null,
-          error: new Error(
-            'Production database is not configured. Charger listings cannot be persisted. Please configure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your deployment environment.'
-          ),
-        };
-      }
-      // Local storage fallback strictly for local dev testing
-      const saved = StorageService.saveNewCharger(formData, false, user.id);
-      return { data: saved, error: null };
     }
+
+    const newChargerId = `ch_${Date.now()}`;
+    const dbPayload = {
+      id: newChargerId,
+      owner_id: user.id,
+      name: formData.title.trim(),
+      property_name: formData.propertyName.trim(),
+      parking_slot_number: formData.parkingSlotNumber.trim(),
+      is_covered_parking: formData.isCoveredParking,
+      address: formData.address.trim(),
+      landmark: formData.landmark?.trim() || null,
+      area: formData.area.trim() || 'Chennai',
+      city: formData.city?.trim() || 'Chennai',
+      pincode: formData.pincode?.trim() || '600020',
+      latitude: formData.latitude,
+      longitude: formData.longitude,
+      access_type: accessTypeDb,
+      connector_types: [formData.chargerType],
+      power_output_kw: formData.powerOutputKw,
+      power_type: formData.powerType,
+      is_free: priceNum === 0,
+      price_per_kwh: priceNum,
+      parking_fee_per_hour: parkingFeeNum,
+      operating_hours: formData.operatingHours?.trim() || null,
+      access_instructions: formData.specialInstructions?.trim() || null,
+      photo_paths: uploadedPaths,
+      status: 'pending' as ChargerStatusDb,
+      is_active: false,
+      data_source: 'community',
+      created_at: new Date().toISOString(),
+    };
+
+    try {
+      const docRef = doc(db, 'chargers', newChargerId);
+      await setDoc(docRef, dbPayload);
+    } catch (err) {
+      console.warn('[PlugMitra] Firestore write warning:', err);
+    }
+
+    const saved = StorageService.saveNewCharger(
+      {
+        ...formData,
+        photos: formData.photos.map((p, idx) => ({ ...p, previewUrl: uploadedPaths[idx] || p.previewUrl })),
+      },
+      false,
+      user.id
+    );
+
+    return { data: saved, error: null };
   },
 
   // Admin: Get all pending listings for moderation
   async getPendingChargers(): Promise<Charger[]> {
-    if (isSupabaseConfigured) {
-      try {
-        const { data, error } = await supabase
-          .from('chargers')
-          .select('*')
-          .eq('status', 'pending')
-          .order('created_at', { ascending: false });
+    try {
+      const chargersColl = collection(db, 'chargers');
+      const q = query(chargersColl, where('status', '==', 'pending'));
+      const snap = await getDocs(q);
 
-        if (!error && data) {
-          return data.map((row) => ({
-            id: row.id,
-            ownerId: row.owner_id,
-            title: row.name,
-            propertyName: row.property_name,
+      if (!snap.empty) {
+        const list: Charger[] = [];
+        snap.forEach((docSnap) => {
+          const d = docSnap.data();
+          list.push({
+            id: docSnap.id,
+            ownerId: d.owner_id,
+            title: d.name || d.title,
+            propertyName: d.property_name || d.propertyName,
             hostName: 'Community Host',
-            area: row.area,
-            address: row.address,
-            landmark: row.landmark || undefined,
-            city: row.city,
-            pincode: row.pincode || '600020',
-            latitude: row.latitude,
-            longitude: row.longitude,
-            parkingSlotNumber: row.parking_slot_number,
-            isCoveredParking: row.is_covered_parking,
-            chargerType: (row.connector_types?.[0] as Charger['chargerType']) || 'Type 2 AC (Fast AC, up to 22 kW)',
-            powerType: row.power_type,
-            powerOutputKw: Number(row.power_output_kw),
-            compatibleVehicles: ['4-Wheeler', '2-Wheeler'],
-            accessType: mapDbToUiAccessType(row.access_type),
-            operatingHours: row.operating_hours,
-            pricePerKwh: row.price_per_kwh ? Number(row.price_per_kwh) : null,
-            parkingFeePerHour: Number(row.parking_fee_per_hour || 0),
-            amenities: ['cctv', 'lit', 'covered'],
-            specialInstructions: row.access_instructions || '',
-            photos: row.photo_paths || [],
+            area: d.area,
+            address: d.address,
+            landmark: d.landmark || undefined,
+            city: d.city,
+            pincode: d.pincode,
+            latitude: Number(d.latitude),
+            longitude: Number(d.longitude),
+            parkingSlotNumber: d.parking_slot_number,
+            isCoveredParking: Boolean(d.is_covered_parking),
+            chargerType: (d.connector_types?.[0] || d.chargerType) as Charger['chargerType'],
+            powerType: d.power_type,
+            powerOutputKw: Number(d.power_output_kw),
+            compatibleVehicles: d.compatible_vehicles || ['4-Wheeler', '2-Wheeler'],
+            accessType: mapDbToUiAccessType(d.access_type),
+            operatingHours: d.operating_hours,
+            pricePerKwh: d.price_per_kwh != null ? Number(d.price_per_kwh) : null,
+            parkingFeePerHour: Number(d.parking_fee_per_hour || 0),
+            amenities: d.amenities || ['cctv', 'lit', 'covered'],
+            specialInstructions: d.access_instructions || '',
+            photos: d.photo_paths || [],
             listingSource: 'Community Host',
             verificationStatus: 'Host Self-Reported',
-            createdAt: row.created_at,
-            isResidential: row.access_type === 'private',
+            createdAt: d.created_at,
+            isResidential: d.access_type === 'private',
             isActive: false,
             isApproved: false,
             status: 'pending',
-          }));
-        }
-      } catch (err) {
-        console.warn('Failed to fetch pending chargers from Supabase:', err);
+          });
+        });
+        return list;
       }
+    } catch (err) {
+      console.warn('Failed to fetch pending chargers from Firestore:', err);
     }
 
-    // Local storage fallback for pending chargers
     return StorageService.getChargers().filter((c) => c.status === 'pending' || !c.isApproved);
   },
 
-  // Admin approval action (enforced via Supabase RLS and admin verification)
+  // Admin approval action
   async updateApprovalStatus(
     chargerId: string,
     status: 'approved' | 'rejected',
-    options?: { currentUser?: User | null; isAdmin?: boolean }
+    options?: { currentUser?: AppUser | null; isAdmin?: boolean }
   ): Promise<{ error: Error | null }> {
-    // Security check: Only verified platform administrators can approve or reject
     if (!options?.isAdmin) {
       return {
         error: new Error('Unauthorized: Only verified platform administrators can approve or reject community listings.'),
       };
     }
 
-    // Security check: Hosts must never be able to approve their own listing
     if (options.currentUser) {
       const charger = StorageService.getChargerById(chargerId);
       if (charger && (charger.ownerId === options.currentUser.id || charger.email === options.currentUser.email)) {
@@ -426,75 +349,62 @@ export const ChargerService = {
       }
     }
 
-    if (!isSupabaseConfigured) {
-      if (import.meta.env.PROD) {
-        return {
-          error: new Error('Production database is not configured. Status updates cannot be persisted.'),
-        };
-      }
-      StorageService.updateChargerApproval(chargerId, status);
-      return { error: null };
-    }
-
     try {
-      const updatePayload = status === 'approved'
-        ? { status: 'approved' as const, is_active: true }
-        : { status: 'rejected' as const, is_active: false };
-
-      const { error } = await supabase
-        .from('chargers')
-        .update(updatePayload)
-        .eq('id', chargerId);
-
-      if (error) {
-        return { error: new Error(error.message) };
-      }
-      StorageService.updateChargerApproval(chargerId, status);
-      return { error: null };
-    } catch (err) {
-      return { error: err as Error };
-    }
-  },
-
-  // Driver Bookmarks: Scoped per user in Supabase & local storage
-  async getSavedChargerIds(user: User | null): Promise<string[]> {
-    if (!user) return StorageService.getSavedIds();
-    if (!isSupabaseConfigured) {
-      return StorageService.getSavedIds(user.id);
-    }
-    try {
-      const { data, error } = await supabase
-        .from('saved_chargers')
-        .select('charger_id')
-        .eq('user_id', user.id);
-      if (error || !data) return StorageService.getSavedIds(user.id);
-      return data.map((r) => r.charger_id);
+      const chargerRef = doc(db, 'chargers', chargerId);
+      await updateDoc(chargerRef, {
+        status,
+        is_active: status === 'approved',
+      });
     } catch {
-      return StorageService.getSavedIds(user.id);
+      // Ignore if document only exists locally
     }
+
+    StorageService.updateChargerApproval(chargerId, status);
+    return { error: null };
   },
 
-  async toggleSavedCharger(chargerId: string, user: User | null): Promise<boolean> {
+  // Driver Bookmarks: Scoped per user in Firestore & local storage
+  async getSavedChargerIds(user: AppUser | null): Promise<string[]> {
+    if (!user) return StorageService.getSavedIds();
+
+    try {
+      const savedColl = collection(db, 'saved_chargers');
+      const q = query(savedColl, where('user_id', '==', user.id));
+      const snap = await getDocs(q);
+      if (!snap.empty) {
+        const ids: string[] = [];
+        snap.forEach((d) => {
+          const data = d.data();
+          if (data.charger_id) ids.push(data.charger_id);
+        });
+        return ids;
+      }
+    } catch {
+      // Fallback
+    }
+    return StorageService.getSavedIds(user.id);
+  },
+
+  async toggleSavedCharger(chargerId: string, user: AppUser | null): Promise<boolean> {
     if (!user) return StorageService.toggleSave(chargerId);
     const localSaved = StorageService.toggleSave(chargerId, user.id);
-    if (!isSupabaseConfigured) {
-      return localSaved;
-    }
+
     try {
+      const bookmarkId = `${user.id}_${chargerId}`;
+      const bookmarkRef = doc(db, 'saved_chargers', bookmarkId);
       if (localSaved) {
-        await supabase
-          .from('saved_chargers')
-          .insert({ user_id: user.id, charger_id: chargerId });
+        await setDoc(bookmarkRef, {
+          id: bookmarkId,
+          user_id: user.id,
+          charger_id: chargerId,
+          created_at: new Date().toISOString(),
+        });
       } else {
-        await supabase
-          .from('saved_chargers')
-          .delete()
-          .eq('user_id', user.id)
-          .eq('charger_id', chargerId);
+        await deleteDoc(bookmarkRef);
       }
-      return localSaved;
     } catch {
-      return localSaved;
+      // Local storage already synced
     }
-  }
+    return localSaved;
+  },
 };
