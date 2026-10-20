@@ -11,6 +11,7 @@ create table if not exists public.profiles (
   full_name text,
   phone text,
   role text not null default 'user' check (role in ('user', 'host', 'admin')),
+  avatar_url text,
   vehicle_make text,
   vehicle_model text,
   vehicle_reg_number text,
@@ -20,6 +21,9 @@ create table if not exists public.profiles (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- Ensure avatar_url column exists if table was previously created
+alter table public.profiles add column if not exists avatar_url text;
 
 -- Enable RLS on profiles
 alter table public.profiles enable row level security;
@@ -46,13 +50,14 @@ security definer
 set search_path = public
 as $$
 begin
-  insert into public.profiles (id, email, full_name, phone, role)
+  insert into public.profiles (id, email, full_name, phone, role, avatar_url)
   values (
     new.id,
     new.email,
     coalesce(new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'name', split_part(new.email, '@', 1)),
     coalesce(new.raw_user_meta_data->>'phone', ''),
-    'user' -- Always defaults to 'user', never trust client metadata
+    'user', -- Always defaults to 'user', never trust client metadata
+    coalesce(new.raw_user_meta_data->>'avatar_url', new.raw_user_meta_data->>'picture', null)
   )
   on conflict (id) do nothing;
   return new;
@@ -111,6 +116,12 @@ create policy "Admins can update any profile"
   to authenticated
   using (public.is_admin(auth.uid()))
   with check (public.is_admin(auth.uid()));
+
+drop policy if exists "Users can insert their own profile" on public.profiles;
+create policy "Users can insert their own profile"
+  on public.profiles for insert
+  to authenticated
+  with check (auth.uid() = id);
 
 
 -- 2. CHARGERS TABLE

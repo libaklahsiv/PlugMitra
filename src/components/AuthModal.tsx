@@ -13,7 +13,7 @@ import {
   ArrowLeft,
   KeyRound
 } from 'lucide-react';
-import { useAuth, AuthModalMode } from '../context/AuthContext';
+import { useAuth } from '../context/AuthContext';
 
 export const AuthModal: React.FC = () => {
   const {
@@ -24,6 +24,7 @@ export const AuthModal: React.FC = () => {
     signIn,
     signUp,
     signInWithGoogle,
+    signInWithDemoAccount,
     resetPassword,
     updatePassword,
     isConfigured,
@@ -224,26 +225,84 @@ export const AuthModal: React.FC = () => {
           </button>
         </div>
 
-        {/* Backend Status Notice */}
-        <div className="px-5 pt-3">
+        {/* Backend Status Notice & Sandbox Persona Switcher */}
+        <div className="px-5 pt-3 space-y-2">
           {isConfigured ? (
-            <div className="p-2 bg-emerald-50 border border-emerald-200 rounded-xl text-[11px] text-emerald-900 flex items-center gap-1.5">
-              <ShieldCheck className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
-              <span>Connected to Live Supabase Authentication</span>
+            <div className="p-2.5 bg-emerald-50 border border-emerald-200 rounded-2xl text-[11px] text-emerald-900 flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+              <div>
+                <span className="font-bold">Live Supabase Authentication Active</span>
+                <p className="text-[10px] text-emerald-700">Multi-tenant accounts, Google OAuth, and RLS enforced.</p>
+              </div>
             </div>
           ) : (
-            <div className="p-2 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-900 flex items-start gap-1.5">
-              <Info className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
-              <span>
-                <strong>Sandbox Offline Mode:</strong> Live Supabase credentials not detected in <code>.env.local</code>. Authentication is running in local simulation.
-              </span>
+            <div className="p-3 bg-amber-50/90 border border-amber-200/90 rounded-2xl text-[11px] text-amber-950 space-y-2">
+              <div className="flex items-start gap-1.5">
+                <Info className="w-3.5 h-3.5 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold">Local Development Sandbox</span>
+                  <p className="text-[10px] text-amber-800 leading-tight">
+                    Supabase keys not yet in <code>.env.local</code>. You can test multi-account workflows using the presets below or create accounts with email.
+                  </p>
+                </div>
+              </div>
+
+              {/* Quick Persona Switcher for local testing */}
+              <div className="pt-1">
+                <span className="text-[10px] uppercase font-bold text-amber-900 tracking-wider block mb-1.5">
+                  Test Personas (Click to Instant Login):
+                </span>
+                <div className="grid grid-cols-3 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await signInWithDemoAccount('driver');
+                      handleClose();
+                    }}
+                    className="p-1.5 bg-white hover:bg-amber-100/70 border border-amber-200 rounded-xl text-center transition flex flex-col items-center gap-0.5"
+                    title="Sign in as EV Driver (Vishal)"
+                  >
+                    <span className="text-xs">🚗</span>
+                    <span className="text-[10px] font-bold text-slate-800 leading-none">EV Driver</span>
+                    <span className="text-[9px] text-slate-500 leading-none">User</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await signInWithDemoAccount('host');
+                      handleClose();
+                    }}
+                    className="p-1.5 bg-white hover:bg-amber-100/70 border border-amber-200 rounded-xl text-center transition flex flex-col items-center gap-0.5"
+                    title="Sign in as Residential Host (Suresh)"
+                  >
+                    <span className="text-xs">🏠</span>
+                    <span className="text-[10px] font-bold text-slate-800 leading-none">Bay Host</span>
+                    <span className="text-[9px] text-slate-500 leading-none">Host</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      await signInWithDemoAccount('admin');
+                      handleClose();
+                    }}
+                    className="p-1.5 bg-white hover:bg-amber-100/70 border border-amber-200 rounded-xl text-center transition flex flex-col items-center gap-0.5"
+                    title="Sign in as Platform Admin"
+                  >
+                    <span className="text-xs">🛡️</span>
+                    <span className="text-[10px] font-bold text-slate-800 leading-none">Admin</span>
+                    <span className="text-[9px] text-slate-500 leading-none">Admin Role</span>
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </div>
 
         {/* Google OAuth Option (for Login & Signup modes) */}
         {(authModalMode === 'login' || authModalMode === 'signup') && (
-          <div className="px-5 pt-4 space-y-3">
+          <div className="px-5 pt-3 space-y-3">
             <button
               type="button"
               disabled={isGoogleSubmitting || isSubmitting}

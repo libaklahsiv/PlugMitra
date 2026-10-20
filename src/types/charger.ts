@@ -32,6 +32,7 @@ export interface LocalPhoto {
 
 export interface Charger {
   id: string;
+  ownerId?: string;
   title: string;
   propertyName: string;
   hostName: string;

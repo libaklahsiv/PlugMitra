@@ -87,14 +87,14 @@ export const AddChargerForm: React.FC<AddChargerFormProps> = ({ onSuccessNavigat
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submittedChargerId, setSubmittedChargerId] = useState<string | null>(null);
 
-  const { user, openAuthModal, isConfigured } = useAuth();
+  const { user, profile, openAuthModal, isConfigured } = useAuth();
 
   const [formData, setFormData] = useState<ChargerRegistrationFormData>({
     propertyName: 'Karpagam Gardens Residential',
     title: 'Adyar Green EV Charging Bay',
-    hostName: 'Kabilan V.',
-    phone: '+91 98765 43210',
-    email: 'kabilan@plugmitra.in',
+    hostName: profile?.full_name || user?.user_metadata?.full_name || 'Kabilan V.',
+    phone: profile?.phone || '+91 98765 43210',
+    email: user?.email || 'kabilan@plugmitra.in',
     address: 'No. 42, 3rd Cross Street, Gandhinagar',
     landmark: 'Opposite Adyar Ananda Bhavan',
     area: 'Adyar',
@@ -118,6 +118,17 @@ export const AddChargerForm: React.FC<AddChargerFormProps> = ({ onSuccessNavigat
   });
 
   const [copiedCoords, setCopiedCoords] = useState(false);
+
+  useEffect(() => {
+    if (user) {
+      setFormData((prev) => ({
+        ...prev,
+        email: user.email || prev.email,
+        hostName: profile?.full_name || (user.user_metadata?.full_name as string) || prev.hostName,
+        phone: profile?.phone || prev.phone,
+      }));
+    }
+  }, [user, profile]);
 
   useEffect(() => {
     if (urlLat !== null && !isNaN(urlLat) && urlLng !== null && !isNaN(urlLng)) {

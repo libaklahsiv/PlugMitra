@@ -22,6 +22,7 @@ import {
   Charger,
   CHENNAI_DEFAULT_COORDINATES
 } from '../types/charger';
+import { useAuth } from '../context/AuthContext';
 
 function calculateDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number) {
   const R = 6371;
@@ -40,6 +41,7 @@ function calculateDistanceKm(lat1: number, lon1: number, lat2: number, lon2: num
 export const ExplorePage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const { user } = useAuth();
 
   // All chargers from persistent storage
   const [allChargers, setAllChargers] = useState<Charger[]>([]);
@@ -81,8 +83,10 @@ export const ExplorePage: React.FC = () => {
   useEffect(() => {
     let isMounted = true;
     setIsLoading(true);
-    const saved = StorageService.getSavedIds();
-    setSavedIds(saved);
+
+    ChargerService.getSavedChargerIds(user).then((saved) => {
+      if (isMounted) setSavedIds(saved);
+    });
 
     ChargerService.getApprovedChargers()
       .then((chargers) => {
@@ -106,11 +110,12 @@ export const ExplorePage: React.FC = () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
     };
-  }, []);
+  }, [user]);
 
-  const handleToggleSave = (id: string) => {
-    StorageService.toggleSave(id);
-    setSavedIds(StorageService.getSavedIds());
+  const handleToggleSave = async (id: string) => {
+    await ChargerService.toggleSavedCharger(id, user);
+    const updated = await ChargerService.getSavedChargerIds(user);
+    setSavedIds(updated);
   };
 
   const handleResetFilters = () => {

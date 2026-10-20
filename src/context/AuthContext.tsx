@@ -9,6 +9,7 @@ export interface UserProfileData {
   full_name: string | null;
   phone: string | null;
   role: UserRoleDb;
+  avatar_url?: string | null;
   vehicle_make: string | null;
   vehicle_model: string | null;
   vehicle_reg_number: string | null;
@@ -34,6 +35,7 @@ interface AuthContextType {
     phone: string
   ) => Promise<{ error: Error | null; confirmationRequired?: boolean }>;
   signInWithGoogle: () => Promise<{ error: Error | null }>;
+  signInWithDemoAccount: (role: 'driver' | 'host' | 'admin') => Promise<{ error: Error | null }>;
   signOut: () => Promise<{ error: Error | null }>;
   resetPassword: (email: string) => Promise<{ error: Error | null }>;
   updatePassword: (newPassword: string) => Promise<{ error: Error | null }>;
@@ -82,18 +84,23 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (localData) {
         setProfile(JSON.parse(localData));
       } else {
+        const namePart = (email?.split('@')[0] || 'driver').replace(/[._-]/g, ' ');
+        const formattedName = namePart.charAt(0).toUpperCase() + namePart.slice(1);
+        const isLocalAdmin = Boolean(email && email.toLowerCase().includes('admin'));
+        const isLocalHost = Boolean(email && email.toLowerCase().includes('host'));
         const fallbackProfile: UserProfileData = {
           id: userId,
           email: email || 'driver@plugmitra.in',
-          full_name: (userMeta?.full_name as string) || (userMeta?.name as string) || 'Vishal Kabilan',
-          phone: (userMeta?.phone as string) || '+91 98765 43210',
-          role: 'user',
-          vehicle_make: 'Tata Motors',
-          vehicle_model: 'Nexon EV Long Range',
-          vehicle_reg_number: 'TN 07 CK 9012',
-          connector_preference: 'CCS2 (DC Fast Charger, 25-60+ kW)',
-          battery_capacity_kwh: 40.5,
-          preferred_area: 'Adyar / OMR',
+          full_name: (userMeta?.full_name as string) || (userMeta?.name as string) || `${formattedName}`,
+          phone: (userMeta?.phone as string) || (isLocalHost ? '+91 94440 12345' : null),
+          role: isLocalAdmin ? 'admin' : isLocalHost ? 'host' : 'user',
+          avatar_url: (userMeta?.avatar_url as string) || (userMeta?.picture as string) || null,
+          vehicle_make: email === 'driver@plugmitra.in' ? 'Tata Motors' : null,
+          vehicle_model: email === 'driver@plugmitra.in' ? 'Nexon EV Long Range' : null,
+          vehicle_reg_number: email === 'driver@plugmitra.in' ? 'TN 07 CK 9012' : null,
+          connector_preference: email === 'driver@plugmitra.in' ? 'CCS2 (DC Fast Charger, 25-60+ kW)' : null,
+          battery_capacity_kwh: email === 'driver@plugmitra.in' ? 40.5 : null,
+          preferred_area: isLocalHost ? 'Adyar' : 'Chennai',
         };
         localStorage.setItem(`plugmitra_profile_${userId}`, JSON.stringify(fallbackProfile));
         setProfile(fallbackProfile);
@@ -127,11 +134,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           full_name: defaultName,
           phone: (userMeta?.phone as string) || null,
           role: 'user',
-          vehicle_make: 'Tata Motors',
-          vehicle_model: 'Nexon EV Long Range',
-          vehicle_reg_number: 'TN 07 CK 9012',
-          connector_preference: 'CCS2 (DC Fast Charger, 25-60+ kW)',
-          battery_capacity_kwh: 40.5,
+          avatar_url: (userMeta?.avatar_url as string) || (userMeta?.picture as string) || null,
+          vehicle_make: null,
+          vehicle_model: null,
+          vehicle_reg_number: null,
+          connector_preference: null,
+          battery_capacity_kwh: null,
           preferred_area: 'Chennai',
         };
         await supabase
@@ -216,6 +224,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             return;
           }
 
+          if (event === 'SIGNED_IN') {
+            setSession(newSession);
+            setUser(newSession?.user ?? null);
+            if (newSession?.user) {
+              await fetchProfile(newSession.user.id, newSession.user.email, newSession.user.user_metadata);
+            }
+            setIsAuthModalOpen(false);
+            setLoading(false);
+            return;
+          }
+
           setSession(newSession);
           setUser(newSession?.user ?? null);
           if (newSession?.user) {
@@ -227,9 +246,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         }
       );
 
+      // 3. Cross-tab & popup session synchronization
+      const handleStorageChange = async (e: StorageEvent) => {
+        if (!mounted) return;
+        if (e.key === LOCAL_AUTH_KEY || (e.key && e.key.includes('supabase.auth.token'))) {
+          const { data: { session: currentSession } } = await supabase.auth.getSession();
+          if (currentSession?.user) {
+            setSession(currentSession);
+            setUser(currentSession.user);
+            await fetchProfile(currentSession.user.id, currentSession.user.email, currentSession.user.user_metadata);
+            setIsAuthModalOpen(false);
+          }
+        }
+      };
+      window.addEventListener('storage', handleStorageChange);
+
       return () => {
         mounted = false;
         subscription.unsubscribe();
+        window.removeEventListener('storage', handleStorageChange);
       };
     } else {
       // In production without live credentials, never simulate auth or load fake session
@@ -359,11 +394,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         full_name: fullName,
         phone,
         role: 'user',
-        vehicle_make: 'Tata Motors',
-        vehicle_model: 'Nexon EV Long Range',
-        vehicle_reg_number: 'TN 07 CK 9012',
-        connector_preference: 'CCS2 (DC Fast Charger, 25-60+ kW)',
-        battery_capacity_kwh: 40.5,
+        avatar_url: null,
+        vehicle_make: null,
+        vehicle_model: null,
+        vehicle_reg_number: null,
+        connector_preference: null,
+        battery_capacity_kwh: null,
         preferred_area: 'Chennai',
       };
       localStorage.setItem(`plugmitra_profile_${mockUser.id}`, JSON.stringify(newProfile));
@@ -425,11 +461,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       // Local offline development simulation
       const mockGoogleEmail = 'chennai.ev.driver@gmail.com';
+      const mockId = `usr_google_${Date.now()}`;
       const mockUser = {
-        id: `usr_google_${Date.now()}`,
+        id: mockId,
         email: mockGoogleEmail,
         app_metadata: { provider: 'google' },
-        user_metadata: { full_name: 'Google EV Driver', avatar_url: '' },
+        user_metadata: {
+          full_name: 'Google EV Driver',
+          avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80',
+        },
         aud: 'authenticated',
         created_at: new Date().toISOString(),
       } as unknown as User;
@@ -440,10 +480,26 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         user: mockUser,
       } as unknown as Session;
 
+      const googleProfile: UserProfileData = {
+        id: mockId,
+        email: mockGoogleEmail,
+        full_name: 'Google EV Driver',
+        phone: null,
+        role: 'user',
+        avatar_url: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=256&q=80',
+        vehicle_make: null,
+        vehicle_model: null,
+        vehicle_reg_number: null,
+        connector_preference: null,
+        battery_capacity_kwh: null,
+        preferred_area: 'Chennai',
+      };
+
       setUser(mockUser);
       setSession(mockSession);
+      localStorage.setItem(`plugmitra_profile_${mockId}`, JSON.stringify(googleProfile));
       localStorage.setItem(LOCAL_AUTH_KEY, JSON.stringify({ user: mockUser, session: mockSession }));
-      await fetchProfile(mockUser.id, mockGoogleEmail, { full_name: 'Google EV Driver' });
+      setProfile(googleProfile);
       setLoading(false);
       setIsAuthModalOpen(false);
       return { error: null };
@@ -451,7 +507,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     try {
       const redirectUrl = `${window.location.origin}/`;
-      const { error } = await supabase.auth.signInWithOAuth({
+      const { data, error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {
           redirectTo: redirectUrl,
@@ -467,12 +523,102 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return { error };
       }
 
-      // Browser redirects to Google consent flow
+      if (data?.url) {
+        try {
+          if (window.top && window.top !== window.self) {
+            window.top.location.href = data.url;
+          } else {
+            window.location.assign(data.url);
+          }
+        } catch {
+          window.location.assign(data.url);
+        }
+      }
+
+      setLoading(false);
       return { error: null };
     } catch (err) {
       setLoading(false);
       return { error: err as Error };
     }
+  };
+
+  const signInWithDemoAccount = async (role: 'driver' | 'host' | 'admin') => {
+    setLoading(true);
+    setOauthError(null);
+
+    let email = 'driver@plugmitra.in';
+    let fullName = 'Vishal Kabilan';
+    let phone = '+91 98765 43210';
+    let assignedRole: UserRoleDb = 'user';
+    let vehicleMake: string | null = 'Tata Motors';
+    let vehicleModel: string | null = 'Nexon EV Long Range';
+    let vehicleReg: string | null = 'TN 07 CK 9012';
+    let connector: string | null = 'CCS2 (DC Fast Charger, 25-60+ kW)';
+    let batteryKwh: number | null = 40.5;
+
+    if (role === 'host') {
+      email = 'suresh.host@plugmitra.in';
+      fullName = 'Suresh Ramanathan';
+      phone = '+91 94440 12345';
+      assignedRole = 'host';
+      vehicleMake = 'MG Motor';
+      vehicleModel = 'ZS EV';
+      vehicleReg = 'TN 07 BM 1122';
+      connector = 'Type 2 AC (Fast AC, up to 22 kW)';
+      batteryKwh = 50.3;
+    } else if (role === 'admin') {
+      email = 'admin@plugmitra.in';
+      fullName = 'Chennai EV Platform Admin';
+      phone = '+91 98400 11000';
+      assignedRole = 'admin';
+      vehicleMake = 'Hyundai';
+      vehicleModel = 'Ioniq 5';
+      vehicleReg = 'TN 01 EV 0001';
+      connector = 'CCS2 (DC Fast Charger, 25-60+ kW)';
+      batteryKwh = 72.6;
+    }
+
+    const mockId = `usr_${role}_demo`;
+    const mockUser = {
+      id: mockId,
+      email,
+      app_metadata: { provider: 'email' },
+      user_metadata: { full_name: fullName, phone },
+      aud: 'authenticated',
+      created_at: new Date().toISOString(),
+    } as unknown as User;
+
+    const mockSession = {
+      access_token: `mock_token_${role}`,
+      token_type: 'bearer',
+      user: mockUser,
+    } as unknown as Session;
+
+    const demoProfile: UserProfileData = {
+      id: mockId,
+      email,
+      full_name: fullName,
+      phone,
+      role: assignedRole,
+      avatar_url: null,
+      vehicle_make: vehicleMake,
+      vehicle_model: vehicleModel,
+      vehicle_reg_number: vehicleReg,
+      connector_preference: connector,
+      battery_capacity_kwh: batteryKwh,
+      preferred_area: role === 'host' ? 'Adyar' : 'Adyar / OMR',
+    };
+
+    localStorage.setItem(`plugmitra_profile_${mockId}`, JSON.stringify(demoProfile));
+    localStorage.setItem(LOCAL_AUTH_KEY, JSON.stringify({ user: mockUser, session: mockSession }));
+
+    setUser(mockUser);
+    setSession(mockSession);
+    setProfile(demoProfile);
+    setLoading(false);
+    setIsAuthModalOpen(false);
+    return { error: null };
   };
 
   const resetPassword = async (email: string) => {
@@ -593,6 +739,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         signIn,
         signUp,
         signInWithGoogle,
+        signInWithDemoAccount,
         signOut,
         resetPassword,
         updatePassword,

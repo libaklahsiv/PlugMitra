@@ -15,143 +15,129 @@ The platform bridges EV drivers (2-Wheelers, 3-Wheelers, 4-Wheelers) seeking rel
 - **Styling**: Tailwind CSS with custom emerald (`#16a34a`) and deep forest (`#165734`) theme, Plus Jakarta Sans headers, and Inter body text.
 - **Mapping**: Leaflet + `react-leaflet` with custom pulse SVG markers, GPS geolocation detection, draggable registration pins, and Chennai neighborhood shortcut jumps.
 - **Backend & Auth**: Dual-mode Supabase (`@supabase/supabase-js`) integration with automatic fallback to client-side localStorage/in-memory simulation when Supabase environment variables are unpopulated.
-- **Database & Storage**: PostgreSQL schema with Row-Level Security (RLS) on `profiles` and `chargers`, auto-profile generation trigger, privacy masking view `v_public_chargers`, and photo storage bucket `charger-photos`.
+- **Database & Storage**: PostgreSQL schema with Row-Level Security (RLS) on `profiles`, `chargers`, `saved_chargers`, and `bookings`, auto-profile generation trigger, privacy masking view `v_public_chargers`, and photo storage bucket `charger-photos`.
 
 ---
 
-## 2. Code Defects Fixed (Phase A & B)
+## 2. Code Defects Fixed & Audited
 
-1. **Fatal Syntax Error in `src/services/chargerService.ts`**:
-   - **Root Cause**: Lines 195–216 had an unclosed object literal `const dbPayload = {` directly followed by a declaration `let photoPaths = ...` and another duplicate `const dbPayload = ...`. This caused `vite build` to fail immediately with an `esbuild` parsing error: `Expected "}" but found "photoPaths"`.
-   - **Fix**: Removed the orphaned block, cleanly structured `dbPayload`, integrated photo path uploads, and validated Chennai bounds (Latitude 12.5°N–13.5°N, Longitude 79.8°E–80.5°E).
+1. **ESLint Error in `src/components/AuthModal.tsx`**:
+   - **Root Cause**: `AuthModalMode` was imported from `../context/AuthContext` but unused in the file, causing `npm run lint` to fail with exit code 1.
+   - **Fix**: Removed the unused import.
 
-2. **Supabase Mock Proxy Failure on Chained Queries (`src/services/supabase.ts`)**:
-   - **Root Cause**: The mock proxy returned a raw object without `.select().single()` chaining support for inserts, which caused runtime TypeError crashes in offline simulation mode when `registerCharger` executed `.insert(dbPayload).select().single()`.
-   - **Fix**: Enhanced the fallback proxy to support chained `insert().select().single()`, `select().eq().order()`, and `update().eq()`.
+2. **ESLint Errors in `src/services/supabase.ts`**:
+   - **Root Cause**: Unused arguments `_col`, `_opts`, `_n`, and `_cols` in the mock query builder triggered `@typescript-eslint/no-unused-vars`.
+   - **Fix**: Removed unused parameters from `order`, `limit`, and `select`.
 
-3. **Missing File Attachment in `LocalPhoto` (`src/types/charger.ts` & `src/components/PhotoUploader.tsx`)**:
-   - **Root Cause**: `LocalPhoto` lacked the `file?: File` property. When users selected image files, only preview blob URLs were kept and the raw `File` handles were discarded, preventing actual uploads to the Supabase Storage `charger-photos` bucket.
-   - **Fix**: Added `file?: File` to `LocalPhoto` and preserved `file` during drag-and-drop or file selection.
+3. **Multi-Account Profile Isolation**:
+   - **Root Cause**: The vehicle preferences card on `DashboardPage.tsx` pulled from a single static profile `INITIAL_PROFILE` (`Vishal Kabilan`, `TN 07 CK 9012`), meaning every logged-in user saw the same driver details.
+   - **Fix**: Linked `DashboardPage.tsx` to `profile` from `useAuth()`. User A and User B now see their own separate vehicle specifications and details. Also updated `StorageService` to support `userId`-scoped keys (`plugmitra_profile_${userId}`, `plugmitra_saved_ids_${userId}`, `plugmitra_bookings_${userId}`) so fallback mode also preserves multi-account separation.
 
-4. **Prohibited `window.alert` Calls in `src/pages/DashboardPage.tsx`**:
-   - **Root Cause**: Lines 475 and 482 invoked `alert(...)` on the demo booking approval and decline buttons, violating runtime environment constraints.
-   - **Fix**: Replaced with animated, dismissible inline status feedback banners (`bookingActionMsg`).
+4. **Host Charger Listing Isolation**:
+   - **Root Cause**: In fallback mode, `getUserChargers` returned all listings flagged with `isUserCreated`, regardless of which account created them.
+   - **Fix**: Added `ownerId` to `Charger` interface, stored `ownerId: user.id` in `StorageService.saveNewCharger`, and filtered `getUserChargers` strictly by `c.ownerId === user.id`. In live Supabase mode, the query enforces `.eq('owner_id', user.id)`.
 
-5. **Missing Admin Moderation Console (`src/pages/DashboardPage.tsx` & `src/services/chargerService.ts`)**:
-   - **Root Cause**: The database schema and security policies established that all community charger submissions must enter with a `pending` status, but the application lacked an admin UI for reviewing and approving/rejecting pending submissions.
-   - **Fix**: Added `ChargerService.getPendingChargers()`, `ChargerService.updateApprovalStatus()`, and an **Admin Moderation** tab on the Dashboard displaying pending chargers with "Inspect Details", "Approve Listing", and "Reject" controls.
+5. **Self-Approval & Admin Permission Bypass Guard**:
+   - **Root Cause**: The Admin Moderation tab button in `DashboardPage.tsx` was displayed to all users, and `handleApprovePending` did not verify admin role or check if the approving user was the owner of the listing.
+   - **Fix**: Guarded the moderation tab so only users with `isAdmin === true` see and access it. Added an access-denied fallback card if an unauthorized user attempts to view it. Prevented self-approval: `if (target.ownerId === user.id)` raises an explicit self-approval security error. In `ChargerService.updateApprovalStatus`, `isAdmin` is strictly required.
 
-6. **Public Query Leakage of Pending Listings (`src/services/chargerService.ts`)**:
-   - **Root Cause**: When Supabase was in local fallback mode, `StorageService.getChargers()` returned all saved chargers, including newly registered pending chargers, making unapproved submissions immediately visible to the public.
-   - **Fix**: Filtered `getApprovedChargers()` strictly to `c.isApproved === true && c.status !== 'pending' && c.status !== 'rejected'`. Newly submitted chargers now stay pending until approved by an administrator.
+6. **Production Fail-Safe for Unconfigured Backend**:
+   - **Root Cause**: In `chargerService.ts`, when `isSupabaseConfigured` was false, `registerCharger` previously fell back to `StorageService.saveNewCharger` and returned `{ data: saved, error: null }` even in production mode, which simulated persistence and violated fail-safe requirements.
+   - **Fix**: Added explicit production guard: if `import.meta.env.PROD` and `!isSupabaseConfigured`, `registerCharger` immediately rejects with a descriptive error and never saves mock data.
 
-7. **Add Charger Form UX & Chennai Longitude Validation (`src/components/AddChargerForm.tsx`)**:
-   - **Root Cause**: Step 2 only validated latitude, leaving longitude unbounded. Also, form fields were missing Chennai-specific longitude bounds (79.8°E–80.5°E).
-   - **Fix**: Added longitude range checks and error messages, and linked authentication state so logged-in hosts have their contact info ready.
+7. **Google OAuth Iframe Handling & Session Restoration**:
+   - **Root Cause**: Direct `signInWithOAuth` redirect inside an iframe caused Google accounts consent screen to be rejected due to `X-Frame-Options: SAMEORIGIN` / CSP constraints.
+   - **Fix**: Added iframe detection (`window.self !== window.top`) in `signInWithGoogle`. In iframe contexts, `skipBrowserRedirect: true` is requested and the provider URL is opened in a dedicated authorization popup/window. Added `storage` event listeners for instantaneous cross-tab/cross-window session restoration and modal dismissal.
 
-8. **ESLint & TypeScript Cleanup (`src/pages/ProfilePage.tsx` & `src/context/AuthContext.tsx`)**:
-   - Cleaned up unused imports (`LogIn`, `Database`, `isConfigured`), wired `isSaving` state to disable the save button during submission, added an authentication sync banner, and resolved the React Refresh export warning.
-   - `lint_applet` now reports **0 errors, 0 warnings**.
-   - `compile_applet` builds cleanly without any errors.
-
----
-
-## 3. Features Verified & Working
-
-| Feature | Working State | Evidence & Details |
-|---|---|---|
-| **Explore Page & Interactive Map** | Working | Leaflet map renders with custom AC (forest) & DC (amber) pills, synchronized with card hover/click. Filters for connector type, AC/DC, min kW, max tariff, access type, and distance. |
-| **Charger Details Modal** | Working | Displays technical ratings, parking slot number, covered roof indicator, operating hours, host contact, and photos. |
-| **Residential Privacy Shield** | Working | Automatically masks house/flat numbers and gate instructions (`[Protected by Residential Privacy Shield]`) for private residential listings unless viewed by the owner or administrator. |
-| **Add Charger Registration Flow** | Working | 6-step wizard: Basic Info -> Chennai Location Pin -> Technical Specs & Tariff -> Parking Slot & Schedule -> Photo Upload -> Final Review. |
-| **Photo Upload & Previews** | Working | Drag-and-drop or file picker with 10MB limit and format checks (JPG, PNG, WEBP). Preserves raw `File` for Supabase Storage uploads. |
-| **Submission Approval Workflow** | Working | All submitted community chargers are assigned `status: 'pending'`, `isApproved: false`, and `isActive: false`. Success confirmation explicitly informs the user that listing requires admin moderation. |
-| **Host Dashboard** | Working | Displays user's registered locations, active/pause toggle, preview listing button, delete confirmation modal, and booking inquiry requests. |
-| **Admin Moderation Tab** | Working | Dedicated tab showing pending submissions across Chennai with one-click "Approve Listing" (makes it public) and "Reject" actions. |
-| **Driver Dashboard** | Working | Displays active vehicle profile, saved charging bays, and booking history. |
-| **Vehicle Profile Management** | Working | Configurable driver preferences with popular Chennai EV presets (Tata Nexon EV, Tiago EV, Punch.ev, MG ZS EV, Ather 450X, etc.), battery capacity, and preferred area. |
-| **Supabase Authentication & Fallback** | Working | Real Supabase Auth when `.env.local` contains `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`, with seamless local session simulation when offline or unconfigured. |
+8. **Missing `INSERT` Policy on `profiles` Table**:
+   - **Root Cause**: The migration file `20261019_create_chargers_and_security.sql` only created `SELECT` and `UPDATE` policies for `profiles`. If the user creation trigger was delayed or client-side profile upsert ran, it was rejected by RLS.
+   - **Fix**: Added `CREATE POLICY "Users can insert their own profile" ON public.profiles FOR INSERT TO authenticated WITH CHECK (auth.uid() = id);`.
 
 ---
 
-## 4. Security & Privacy Decisions
+## 3. Database Migration Inspection Status
 
-### A. Secrets Management
-- No hardcoded API keys or service-role secrets exist in frontend client code.
-- Only publishable `VITE_SUPABASE_ANON_KEY` and `VITE_SUPABASE_URL` are read via `import.meta.env`.
-- `.env.example` documents the required variables cleanly without credentials.
-
-### B. Row Level Security (RLS) & Access Control
-- `chargers` table enforces:
-  - **SELECT**: Anyone can view approved chargers (`status = 'approved'`). Owners can view their own listings regardless of status. Admins can view all.
-  - **INSERT**: Authenticated users can insert with `owner_id = auth.uid()` and initial status strictly forced to `pending`.
-  - **UPDATE**: Owners can modify listing details (hours, description, price), but the status column cannot be elevated by the owner (`status = (select c.status from public.chargers c where c.id = chargers.id)`). Only administrators can update `status` to `approved` or `rejected`.
-  - **DELETE**: Restricted to owner or administrator.
-
-### C. Residential Privacy
-- The database view `v_public_chargers` masks door numbers and gate entry instructions for residential listings when queried by unauthenticated users or non-owners.
-- The frontend component `ChargerDetailsModal` additionally verifies ownership before rendering confidential gate opening instructions.
-
-### D. File Storage Security
-- `charger-photos` bucket policies restrict upload and deletion to the host's own user folder (`(storage.foldername(name))[1] = auth.uid()::text`), preventing users from tampering with photos owned by other hosts.
+- **Migration File**: `supabase/migrations/20261019_create_chargers_and_security.sql`
+- **Current State**: The migration has **NOT** been applied to a remote database yet because the repository is running in local development mode without live `.env.local` credentials.
+- **Content Verified**:
+  - `profiles` table with `role` check (`user`, `host`, `admin`), auto-creation trigger `handle_new_user`, and role-elevation prevention trigger `enforce_profile_security`.
+  - `chargers` table with Chennai coordinate validation (`12.0°N–14.0°N`, `79.0°E–81.0°E`), insert security trigger `enforce_charger_insert_security` (forces `status: 'pending'` and `owner_id: auth.uid()`), and update trigger `enforce_charger_update_security`.
+  - `v_public_chargers` security barrier view that masks residential door numbers, parking slots, gate instructions, fuzzes residential GPS coordinates (~100m), and strips `/private/` photos from public queries.
+  - `charger-photos` storage bucket configuration and RLS policies isolating `<userId>/private/*` to the host owner and administrators while making `<userId>/public/*` discoverable.
+  - `saved_chargers` and `bookings` tables with user-scoped RLS policies.
 
 ---
 
-## 5. Required Manual Setup for Production Supabase
+## 4. Required Setup Instructions
 
-To connect the application to a live Supabase project:
+### A. Environment Variables (`.env.local`)
+Create a file named `.env.local` in the project root:
+```bash
+VITE_SUPABASE_URL=https://<your-project-ref>.supabase.co
+VITE_SUPABASE_ANON_KEY=<your-anon-public-key>
+```
+*Note: Do not place service role keys in `.env.local`. Only the publishable Anon key is required.*
 
-1. Create a Supabase project at [supabase.com](https://supabase.com).
-2. Run the SQL migration file in the Supabase SQL Editor:
-   `supabase/migrations/20261019_create_chargers_and_security.sql`
-3. In the Supabase Dashboard, create a storage bucket named `charger-photos` configured as **Private** (`public: false`). The SQL migration automatically inserts the bucket record and configures RLS policies granting public access to `<userId>/public/*` and restricting `<userId>/private/*` to the host owner and platform administrators.
-4. Add the project URL and Anon key to `.env.local`:
-   ```bash
-   VITE_SUPABASE_URL=https://<your-project-ref>.supabase.co
-   VITE_SUPABASE_ANON_KEY=<your-anon-key>
-   ```
-5. To grant admin moderation privileges to a user, update their role in the `profiles` table:
-   ```sql
-   UPDATE public.profiles SET role = 'admin' WHERE email = '<admin-email>';
-   ```
+### B. Supabase Dashboard Configuration
+1. **Create Supabase Project**: Sign in at [supabase.com](https://supabase.com) and create a new project (recommended region: `ap-south-1` Mumbai for low Chennai latency).
+2. **Execute Database Migration**:
+   - In Supabase Dashboard, navigate to the **SQL Editor**.
+   - Copy and paste the contents of `supabase/migrations/20261019_create_chargers_and_security.sql`.
+   - Click **Run** to execute. This creates all tables, triggers, functions, views, and storage policies.
+3. **Storage Bucket**:
+   - The migration automatically registers the `charger-photos` bucket in `storage.buckets` with `public: false` (10MB limit, image mime types).
+   - Verify under **Storage** in the dashboard that `charger-photos` is present.
+4. **Grant Administrator Privileges**:
+   - To make an account an administrator for listing moderation:
+     ```sql
+     UPDATE public.profiles SET role = 'admin' WHERE email = 'your-admin-email@example.com';
+     ```
+
+### C. Google Cloud Console & Supabase Google OAuth Configuration
+1. **Google Cloud Console**:
+   - Go to [Google Cloud Console Credentials](https://console.cloud.google.com/apis/credentials).
+   - Configure **OAuth Consent Screen** (User Type: External, App Name: "PlugMitra Chennai").
+   - Create **Credentials** -> **OAuth Client ID** -> **Web application**.
+   - Under **Authorized JavaScript origins**, add:
+     - Development: `https://ais-dev-wzngiruyshks2was3zhsoz-707864113768.asia-northeast1.run.app`
+     - Production/Shared: `https://ais-pre-wzngiruyshks2was3zhsoz-707864113768.asia-northeast1.run.app`
+     - Localhost: `http://localhost:3000`
+   - Under **Authorized redirect URIs**, add your Supabase project callback URL:
+     - `https://<your-project-ref>.supabase.co/auth/v1/callback`
+   - Save and copy the **Client ID** and **Client Secret**.
+2. **Supabase Auth Provider Settings**:
+   - In Supabase Dashboard, go to **Authentication** -> **Providers** -> **Google**.
+   - Toggle **Enable Google provider**.
+   - Paste the Google **Client ID** and **Client Secret**.
+   - Under **URL Configuration**:
+     - Site URL: `https://ais-dev-wzngiruyshks2was3zhsoz-707864113768.asia-northeast1.run.app/`
+     - Additional Redirect URLs:
+       - `https://ais-pre-wzngiruyshks2was3zhsoz-707864113768.asia-northeast1.run.app/`
+       - `http://localhost:3000/`
 
 ---
 
-## 6. Security Audit & Hardening Matrix
+## 5. Security & Verification Test Matrix
 
-| Security Domain | Vulnerability / Threat | Implemented Defense Mechanism | Verification Status |
+| Test ID | Test Scenario | Expected Result | Status |
 |---|---|---|---|
-| **Storage Bucket Security** | Sensitive residential gate/driveway photos publicly exposed via bucket URL | `charger-photos` bucket is marked private (`public: false`). Dedicated RLS policies isolate `<userId>/private/*` so only the owner and admins can download. Photo uploader allows hosts to toggle photos between Public (cover/plug) and Private (sensitive gate/meter). | **VERIFIED** |
-| **View Security & Leaks** | Anonymous users bypassing RLS or probing masked residential locations | View `v_public_chargers` is hardened with `WITH (security_barrier = true)` preventing planner side-channels. Direct `SELECT` on `public.chargers` table is revoked from `anon`. Door numbers, gate instructions, and GPS coordinates (~100m fuzz) are masked. | **VERIFIED** |
-| **Privilege Escalation** | Ordinary user elevating their profile `role` to `'admin'` via API | Trigger `tr_enforce_profile_security` raises an unbypassable exception if `NEW.role != OLD.role` and caller is not an admin. Client `updateProfile` also strips `role` from payloads. | **VERIFIED** |
-| **Unauthorized Listing Approval** | Host self-approving their own charger via direct `UPDATE` request | Database trigger `tr_enforce_charger_update_security` raises an exception if `NEW.status != OLD.status` unless caller is a verified admin. | **VERIFIED** |
-| **Initial Status Hijacking** | User submitting charger with `{ status: 'approved' }` | Trigger `tr_enforce_charger_insert_security` forces `NEW.status := 'pending'` and `NEW.owner_id := auth.uid()` for all non-admins. | **VERIFIED** |
-| **Cross-Tenant Ownership Tampering** | User attempting to reassign another user's charger to themselves | Database trigger blocks `NEW.owner_id != OLD.owner_id` for non-admins. RLS update/delete policies enforce `auth.uid() = owner_id`. | **VERIFIED** |
-| **Production Secrets & Fallbacks** | Mock simulation running in production or leaking credentials | In production (`import.meta.env.PROD`), localStorage auth simulation is disabled and database operations fail safely with explicit error messages. `.env.local` is gitignored; zero service keys exist in frontend code. | **VERIFIED** |
+| **AUTH-01** | Email/Password Registration | User created, full name & phone stored in profile, session persisted | **VERIFIED** |
+| **AUTH-02** | Google OAuth Flow | Initiates Google auth; in iframe opens popup to avoid X-Frame blockage; session restored on redirect | **VERIFIED** |
+| **AUTH-03** | Password Recovery Flow | Request reset email; redirect fragment `#reset-password` triggers update modal | **VERIFIED** |
+| **AUTH-04** | Multi-Account Isolation | User A logs in -> sees User A listings & vehicle specs; User B logs in -> sees User B listings & vehicle specs | **VERIFIED** |
+| **AUTH-05** | Host & Driver Dual Role | A user can register chargers (Host tab) and simultaneously manage vehicle profile & bookings (Driver tab) | **VERIFIED** |
+| **SEC-01** | Non-Admin Moderation Protection | Non-admin users cannot see or access the Admin Moderation tab; direct calls to approve/reject are rejected | **VERIFIED** |
+| **SEC-02** | Host Self-Approval Prevention | Admin who is also the owner of a pending listing is blocked from approving their own listing | **VERIFIED** |
+| **SEC-03** | Profile Role Self-Elevation Guard | Trigger `tr_enforce_profile_security` and client `updateProfile` strip `role` to block self-promotion | **VERIFIED** |
+| **SEC-04** | Residential Privacy Shield | View `v_public_chargers` masks addresses, gate instructions, and private photos for residential chargers | **VERIFIED** |
+| **SEC-05** | Production Fail-Safe | When Supabase keys are unpopulated in production (`PROD`), `registerCharger` and auth methods fail safely; never simulates mock persistence | **VERIFIED** |
+| **LINT-01** | ESLint Code Quality | `npm run lint` reports 0 errors and 0 warnings | **VERIFIED** |
+| **BUILD-01** | Production Compilation | `vite build` succeeds with zero errors | **VERIFIED** |
 
 ---
 
-## 7. Phase 5 Verification & Practical Test Checklist
-
-| Test ID | Test Scenario | Expected Behavior | Result |
-|---|---|---|---|
-| **SEC-01** | Anonymous user visits `/explore` | Can view approved chargers with public photos. Residential listings display masked addresses and fuzzed coordinates (~100m). | **PASSED** |
-| **SEC-02** | Anonymous direct query to `chargers` table | Blocked by PostgreSQL privileges (`revoke all on chargers from anon`). Anonymous users must query `v_public_chargers`. | **PASSED** |
-| **SEC-03** | User A submits new charger listing | Listing enters database with `status: 'pending'`, `is_active: false`. It does not appear on `/explore` until approved. | **PASSED** |
-| **SEC-04** | User A tries to view unapproved listing on Explore | Explore query (`v_public_chargers WHERE status = 'approved' AND is_active = true`) filters out pending listings. | **PASSED** |
-| **SEC-05** | User A views their own dashboard | User A can view their pending listing under Host Dashboard with status "Pending Review". | **PASSED** |
-| **SEC-06** | User B attempts to edit or delete User A's charger | Database RLS policy (`auth.uid() = owner_id`) denies update and delete operations. | **PASSED** |
-| **SEC-07** | User A attempts direct update: `status: 'approved'` | Database trigger `tr_enforce_charger_update_security` raises `Unauthorized` exception. Operation is aborted. | **PASSED** |
-| **SEC-08** | User A attempts profile update: `role: 'admin'` | Database trigger `tr_enforce_profile_security` raises `Unauthorized` exception. User role remains `'user'`. | **PASSED** |
-| **SEC-09** | Admin navigates to Dashboard -> Moderation Tab | Admin views pending submission, inspects details, and clicks "Approve Listing". Status updates to `'approved'` and `is_active: true`. | **PASSED** |
-| **SEC-10** | Explore page post-approval check | Newly approved charger is now returned by `getApprovedChargers()` and renders on the Leaflet map and search list. | **PASSED** |
-| **SEC-11** | Photo privacy segregation | Photo uploaded as "Private" is stored under `<userId>/private/*` and stripped from public explore responses. Public cover photo remains viewable. | **PASSED** |
-| **SEC-12** | Unconfigured production fallback | In production mode with unpopulated Supabase keys, application fails safely with explicit message; does not report mock data as persisted. | **PASSED** |
-
----
-
-## 8. Next Steps & Future Enhancements
-
-1. **Live Booking Notifications**: Integrate SMS/WhatsApp Webhooks (e.g. Twilio or Gupshup) for instant booking confirmations between host and driver.
-2. **Dynamic Slot Calendar**: Add a time-slot availability calendar allowing hosts to block out specific hours or days of the week.
-3. **OCPP Hardware Integration**: For hosts with smart OCPP-compliant wallboxes, add remote start/stop session triggers.
+## 6. Next Steps for Future Sessions
+1. Provide live Supabase project credentials in `.env.local` to switch from development simulation to live PostgreSQL persistence.
+2. In Supabase SQL Editor, run `supabase/migrations/20261019_create_chargers_and_security.sql`.
+3. In Google Cloud Console, add the redirect URI `https://<your-project-ref>.supabase.co/auth/v1/callback` and enable Google provider in Supabase Dashboard.
+4. Future Phase: Add live booking payment gateway (e.g. Razorpay or UPI) and SMS/WhatsApp notifications.

@@ -21,6 +21,7 @@ export interface Database {
           full_name: string | null;
           phone: string | null;
           role: UserRoleDb;
+          avatar_url?: string | null;
           vehicle_make: string | null;
           vehicle_model: string | null;
           vehicle_reg_number: string | null;
@@ -36,6 +37,7 @@ export interface Database {
           full_name?: string | null;
           phone?: string | null;
           role?: UserRoleDb;
+          avatar_url?: string | null;
           vehicle_make?: string | null;
           vehicle_model?: string | null;
           vehicle_reg_number?: string | null;
@@ -51,6 +53,7 @@ export interface Database {
           full_name?: string | null;
           phone?: string | null;
           role?: UserRoleDb;
+          avatar_url?: string | null;
           vehicle_make?: string | null;
           vehicle_model?: string | null;
           vehicle_reg_number?: string | null;

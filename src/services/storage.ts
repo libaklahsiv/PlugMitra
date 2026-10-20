@@ -304,10 +304,11 @@ export const StorageService = {
     return list.find((c) => c.id === id);
   },
 
-  saveNewCharger(formData: ChargerRegistrationFormData, isApproved: boolean = false): Charger {
+  saveNewCharger(formData: ChargerRegistrationFormData, isApproved: boolean = false, userId?: string): Charger {
     const chargers = this.getChargers();
     const newCharger: Charger = {
       id: `ch-user-${Date.now()}`,
+      ownerId: userId || 'usr_anonymous',
       title: formData.title.trim() || `${formData.area} Community Point`,
       propertyName: formData.propertyName.trim() || formData.title,
       hostName: formData.hostName.trim() || 'Community Host',
@@ -380,22 +381,29 @@ export const StorageService = {
     localStorage.setItem(STORAGE_KEYS.CHARGERS, JSON.stringify(list));
   },
 
-  // Saved / Bookmark IDs
-  getSavedIds(): string[] {
+  // Saved / Bookmark IDs (scoped per user)
+  getSavedIds(userId?: string): string[] {
     try {
-      const data = localStorage.getItem(STORAGE_KEYS.SAVED_IDS);
-      return data ? JSON.parse(data) : ['ch-adyar-01'];
+      const key = userId ? `${STORAGE_KEYS.SAVED_IDS}_${userId}` : STORAGE_KEYS.SAVED_IDS;
+      const data = localStorage.getItem(key);
+      if (data) return JSON.parse(data);
+      // For initial guest demo:
+      if (!userId) {
+        return ['ch-adyar-01'];
+      }
+      return [];
     } catch {
       return [];
     }
   },
 
-  isSaved(id: string): boolean {
-    return this.getSavedIds().includes(id);
+  isSaved(id: string, userId?: string): boolean {
+    return this.getSavedIds(userId).includes(id);
   },
 
-  toggleSave(id: string): boolean {
-    const ids = this.getSavedIds();
+  toggleSave(id: string, userId?: string): boolean {
+    const key = userId ? `${STORAGE_KEYS.SAVED_IDS}_${userId}` : STORAGE_KEYS.SAVED_IDS;
+    const ids = this.getSavedIds(userId);
     let updated: string[];
     let nowSaved = false;
     if (ids.includes(id)) {
@@ -404,31 +412,36 @@ export const StorageService = {
       updated = [...ids, id];
       nowSaved = true;
     }
-    localStorage.setItem(STORAGE_KEYS.SAVED_IDS, JSON.stringify(updated));
+    localStorage.setItem(key, JSON.stringify(updated));
     return nowSaved;
   },
 
-  getSavedChargers(): Charger[] {
-    const savedIds = this.getSavedIds();
+  getSavedChargers(userId?: string): Charger[] {
+    const savedIds = this.getSavedIds(userId);
     return this.getChargers().filter((c) => savedIds.includes(c.id));
   },
 
-  // Bookings
-  getBookings(): BookingRequest[] {
+  // Bookings (scoped per user)
+  getBookings(userId?: string): BookingRequest[] {
     try {
-      const data = localStorage.getItem(STORAGE_KEYS.BOOKINGS);
+      const key = userId ? `${STORAGE_KEYS.BOOKINGS}_${userId}` : STORAGE_KEYS.BOOKINGS;
+      const data = localStorage.getItem(key);
       if (!data) {
-        localStorage.setItem(STORAGE_KEYS.BOOKINGS, JSON.stringify(INITIAL_BOOKINGS));
-        return INITIAL_BOOKINGS;
+        if (!userId) {
+          localStorage.setItem(STORAGE_KEYS.BOOKINGS, JSON.stringify(INITIAL_BOOKINGS));
+          return INITIAL_BOOKINGS;
+        }
+        return [];
       }
       return JSON.parse(data);
     } catch {
-      return INITIAL_BOOKINGS;
+      return !userId ? INITIAL_BOOKINGS : [];
     }
   },
 
-  createBooking(booking: Omit<BookingRequest, 'id' | 'createdAt'>): BookingRequest {
-    const list = this.getBookings();
+  createBooking(booking: Omit<BookingRequest, 'id' | 'createdAt'>, userId?: string): BookingRequest {
+    const key = userId ? `${STORAGE_KEYS.BOOKINGS}_${userId}` : STORAGE_KEYS.BOOKINGS;
+    const list = this.getBookings(userId);
     const newBooking: BookingRequest = {
       ...booking,
       id: `bk-${Date.now()}`,
@@ -436,18 +449,37 @@ export const StorageService = {
       isDemo: false,
     };
     const updated = [newBooking, ...list];
-    localStorage.setItem(STORAGE_KEYS.BOOKINGS, JSON.stringify(updated));
+    localStorage.setItem(key, JSON.stringify(updated));
     return newBooking;
   },
 
-  updateBookingStatus(id: string, status: BookingRequest['status']): void {
-    const list = this.getBookings().map((b) => (b.id === id ? { ...b, status } : b));
-    localStorage.setItem(STORAGE_KEYS.BOOKINGS, JSON.stringify(list));
+  updateBookingStatus(id: string, status: BookingRequest['status'], userId?: string): void {
+    const key = userId ? `${STORAGE_KEYS.BOOKINGS}_${userId}` : STORAGE_KEYS.BOOKINGS;
+    const list = this.getBookings(userId).map((b) => (b.id === id ? { ...b, status } : b));
+    localStorage.setItem(key, JSON.stringify(list));
   },
 
-  // User Profile
-  getUserProfile(): UserProfile {
+  // User Profile (scoped per user)
+  getUserProfile(userId?: string): UserProfile {
     try {
+      if (userId) {
+        const userSpecific = localStorage.getItem(`plugmitra_profile_${userId}`);
+        if (userSpecific) {
+          const parsed = JSON.parse(userSpecific);
+          return {
+            name: parsed.full_name || parsed.name || 'EV Driver',
+            email: parsed.email || '',
+            phone: parsed.phone || '',
+            vehicleMake: parsed.vehicle_make || 'Tata Motors',
+            vehicleModel: parsed.vehicle_model || 'Nexon EV Long Range',
+            vehicleRegNumber: parsed.vehicle_reg_number || 'TN 07 CK 9012',
+            connectorPreference: parsed.connector_preference || 'CCS2 (DC Fast Charger, 25-60+ kW)',
+            batteryCapacityKwh: parsed.battery_capacity_kwh || 40.5,
+            preferredArea: parsed.preferred_area || 'Chennai',
+            isVerifiedDriver: true,
+          };
+        }
+      }
       const data = localStorage.getItem(STORAGE_KEYS.PROFILE);
       return data ? JSON.parse(data) : INITIAL_PROFILE;
     } catch {
@@ -455,7 +487,22 @@ export const StorageService = {
     }
   },
 
-  saveUserProfile(profile: UserProfile): void {
+  saveUserProfile(profile: UserProfile, userId?: string): void {
+    if (userId) {
+      const userSpecific = {
+        id: userId,
+        email: profile.email,
+        full_name: profile.name,
+        phone: profile.phone,
+        vehicle_make: profile.vehicleMake,
+        vehicle_model: profile.vehicleModel,
+        vehicle_reg_number: profile.vehicleRegNumber,
+        connector_preference: profile.connectorPreference,
+        battery_capacity_kwh: profile.batteryCapacityKwh,
+        preferred_area: profile.preferredArea,
+      };
+      localStorage.setItem(`plugmitra_profile_${userId}`, JSON.stringify(userSpecific));
+    }
     localStorage.setItem(STORAGE_KEYS.PROFILE, JSON.stringify(profile));
   },
 

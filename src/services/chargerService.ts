@@ -65,6 +65,7 @@ export const ChargerService = {
         const rows = data as unknown as Database['public']['Views']['v_public_chargers']['Row'][];
         const mappedFromDb: Charger[] = rows.map((row) => ({
           id: row.id,
+          ownerId: row.owner_id,
           title: row.name,
           propertyName: row.property_name,
           hostName: row.data_source === 'imported' ? 'Public Station Host' : 'Verified Community Host',
@@ -111,7 +112,9 @@ export const ChargerService = {
   async getUserChargers(user: User | null): Promise<Charger[]> {
     if (!user) return [];
 
-    const localUserCreated = StorageService.getChargers().filter((c) => c.isUserCreated);
+    const localUserCreated = StorageService.getChargers().filter(
+      (c) => c.ownerId === user.id || (c.isUserCreated && !c.ownerId)
+    );
 
     if (!isSupabaseConfigured) {
       return localUserCreated;
@@ -132,6 +135,7 @@ export const ChargerService = {
       if (data) {
         return data.map((row) => ({
           id: row.id,
+          ownerId: row.owner_id,
           title: row.name,
           propertyName: row.property_name,
           hostName: user.user_metadata?.full_name || 'Community Host',
@@ -163,6 +167,7 @@ export const ChargerService = {
           isActive: row.status === 'approved',
           isApproved: row.status === 'approved',
           isUserCreated: true,
+          status: row.status,
         }));
       }
 
@@ -281,6 +286,7 @@ export const ChargerService = {
         // Return successfully saved charger
         const newCharger: Charger = {
           id: data.id,
+          ownerId: data.owner_id,
           title: data.name,
           propertyName: data.property_name,
           hostName: user.user_metadata?.full_name || formData.hostName,
@@ -317,15 +323,27 @@ export const ChargerService = {
         };
 
         // Cache in local storage for host dashboard tracking (with pending status)
-        StorageService.saveNewCharger({ ...formData, photos: formData.photos.map((p, idx) => ({ ...p, previewUrl: photoPaths[idx] || p.previewUrl })) }, false);
+        StorageService.saveNewCharger(
+          { ...formData, photos: formData.photos.map((p, idx) => ({ ...p, previewUrl: photoPaths[idx] || p.previewUrl })) },
+          false,
+          user.id
+        );
         return { data: newCharger, error: null };
       } catch (err: unknown) {
         return { data: null, error: err as Error };
       }
     } else {
-      // Local storage fallback when Supabase keys are not in .env.local
-      // Save with pending approval status
-      const saved = StorageService.saveNewCharger(formData, false);
+      // Production fail-safe: Never simulate saved persistence in production when Supabase is not configured
+      if (import.meta.env.PROD) {
+        return {
+          data: null,
+          error: new Error(
+            'Production database is not configured. Charger listings cannot be persisted. Please configure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your deployment environment.'
+          ),
+        };
+      }
+      // Local storage fallback strictly for local dev testing
+      const saved = StorageService.saveNewCharger(formData, false, user.id);
       return { data: saved, error: null };
     }
   },
@@ -343,6 +361,7 @@ export const ChargerService = {
         if (!error && data) {
           return data.map((row) => ({
             id: row.id,
+            ownerId: row.owner_id,
             title: row.name,
             propertyName: row.property_name,
             hostName: 'Community Host',
@@ -384,12 +403,36 @@ export const ChargerService = {
     return StorageService.getChargers().filter((c) => c.status === 'pending' || !c.isApproved);
   },
 
-  // Admin approval action (enforced via Supabase RLS)
-  async updateApprovalStatus(chargerId: string, status: 'approved' | 'rejected'): Promise<{ error: Error | null }> {
-    // Update local storage representation
-    StorageService.updateChargerApproval(chargerId, status);
+  // Admin approval action (enforced via Supabase RLS and admin verification)
+  async updateApprovalStatus(
+    chargerId: string,
+    status: 'approved' | 'rejected',
+    options?: { currentUser?: User | null; isAdmin?: boolean }
+  ): Promise<{ error: Error | null }> {
+    // Security check: Only verified platform administrators can approve or reject
+    if (!options?.isAdmin) {
+      return {
+        error: new Error('Unauthorized: Only verified platform administrators can approve or reject community listings.'),
+      };
+    }
+
+    // Security check: Hosts must never be able to approve their own listing
+    if (options.currentUser) {
+      const charger = StorageService.getChargerById(chargerId);
+      if (charger && (charger.ownerId === options.currentUser.id || charger.email === options.currentUser.email)) {
+        return {
+          error: new Error('Unauthorized: Hosts cannot approve their own listings. Platform administrator review is required.'),
+        };
+      }
+    }
 
     if (!isSupabaseConfigured) {
+      if (import.meta.env.PROD) {
+        return {
+          error: new Error('Production database is not configured. Status updates cannot be persisted.'),
+        };
+      }
+      StorageService.updateChargerApproval(chargerId, status);
       return { error: null };
     }
 
@@ -406,9 +449,52 @@ export const ChargerService = {
       if (error) {
         return { error: new Error(error.message) };
       }
+      StorageService.updateChargerApproval(chargerId, status);
       return { error: null };
     } catch (err) {
       return { error: err as Error };
+    }
+  },
+
+  // Driver Bookmarks: Scoped per user in Supabase & local storage
+  async getSavedChargerIds(user: User | null): Promise<string[]> {
+    if (!user) return StorageService.getSavedIds();
+    if (!isSupabaseConfigured) {
+      return StorageService.getSavedIds(user.id);
+    }
+    try {
+      const { data, error } = await supabase
+        .from('saved_chargers')
+        .select('charger_id')
+        .eq('user_id', user.id);
+      if (error || !data) return StorageService.getSavedIds(user.id);
+      return data.map((r) => r.charger_id);
+    } catch {
+      return StorageService.getSavedIds(user.id);
+    }
+  },
+
+  async toggleSavedCharger(chargerId: string, user: User | null): Promise<boolean> {
+    if (!user) return StorageService.toggleSave(chargerId);
+    const localSaved = StorageService.toggleSave(chargerId, user.id);
+    if (!isSupabaseConfigured) {
+      return localSaved;
+    }
+    try {
+      if (localSaved) {
+        await supabase
+          .from('saved_chargers')
+          .insert({ user_id: user.id, charger_id: chargerId });
+      } else {
+        await supabase
+          .from('saved_chargers')
+          .delete()
+          .eq('user_id', user.id)
+          .eq('charger_id', chargerId);
+      }
+      return localSaved;
+    } catch {
+      return localSaved;
     }
   }
 };

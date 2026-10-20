@@ -17,7 +17,8 @@ import {
   CheckCircle2,
   AlertCircle,
   XCircle,
-  LogIn
+  LogIn,
+  Lock
 } from 'lucide-react';
 import { StorageService } from '../services/storage';
 import { ChargerService } from '../services/chargerService';
@@ -41,13 +42,15 @@ export const DashboardPage: React.FC = () => {
   const [bookingActionMsg, setBookingActionMsg] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
-    setSavedChargers(StorageService.getSavedChargers());
+    const savedIds = await ChargerService.getSavedChargerIds(user);
+    const allChargers = StorageService.getChargers();
+    setSavedChargers(allChargers.filter((c) => savedIds.includes(c.id)));
     const userChargers = await ChargerService.getUserChargers(user);
     setHostListings(userChargers);
     const pending = await ChargerService.getPendingChargers();
     setPendingChargers(pending);
-    setBookings(StorageService.getBookings());
-    setUserProfile(StorageService.getUserProfile());
+    setBookings(StorageService.getBookings(user?.id));
+    setUserProfile(StorageService.getUserProfile(user?.id));
   }, [user]);
 
   useEffect(() => {
@@ -66,17 +69,27 @@ export const DashboardPage: React.FC = () => {
   };
 
   const handleBookingStatusChange = (id: string, status: BookingRequest['status']) => {
-    StorageService.updateBookingStatus(id, status);
+    StorageService.updateBookingStatus(id, status, user?.id);
     loadData();
   };
 
-  const handleRemoveSaved = (id: string) => {
-    StorageService.toggleSave(id);
-    loadData();
+  const handleRemoveSaved = async (id: string) => {
+    await ChargerService.toggleSavedCharger(id, user);
+    await loadData();
   };
 
   const handleApprovePending = async (chargerId: string) => {
-    const { error } = await ChargerService.updateApprovalStatus(chargerId, 'approved');
+    const target = pendingChargers.find((c) => c.id === chargerId);
+    if (target?.ownerId && user?.id && target.ownerId === user.id) {
+      setModerationMsg({
+        id: chargerId,
+        text: 'Self-approval blocked: Platform security rules prohibit hosts from approving their own listings.',
+        type: 'error',
+      });
+      return;
+    }
+
+    const { error } = await ChargerService.updateApprovalStatus(chargerId, 'approved', { currentUser: user, isAdmin });
     if (error) {
       setModerationMsg({ id: chargerId, text: `Approval failed: ${error.message}`, type: 'error' });
     } else {
@@ -86,7 +99,7 @@ export const DashboardPage: React.FC = () => {
   };
 
   const handleRejectPending = async (chargerId: string) => {
-    const { error } = await ChargerService.updateApprovalStatus(chargerId, 'rejected');
+    const { error } = await ChargerService.updateApprovalStatus(chargerId, 'rejected', { currentUser: user, isAdmin });
     if (error) {
       setModerationMsg({ id: chargerId, text: `Rejection failed: ${error.message}`, type: 'error' });
     } else {
@@ -137,23 +150,25 @@ export const DashboardPage: React.FC = () => {
             <Building className="w-4 h-4 text-forest-700" />
             <span>Host / Owner Dashboard</span>
           </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab('moderation')}
-            className={`px-4 py-2 rounded-xl transition flex items-center gap-2 ${
-              activeTab === 'moderation'
-                ? 'bg-white text-forest-900 shadow-xs'
-                : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <ShieldCheck className="w-4 h-4 text-emerald-600" />
-            <span>Admin Moderation</span>
-            {pendingChargers.length > 0 && (
-              <span className="px-1.5 py-0.2 bg-amber-500 text-white rounded-full text-[10px] font-bold">
-                {pendingChargers.length}
-              </span>
-            )}
-          </button>
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => setActiveTab('moderation')}
+              className={`px-4 py-2 rounded-xl transition flex items-center gap-2 ${
+                activeTab === 'moderation'
+                  ? 'bg-white text-forest-900 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <ShieldCheck className="w-4 h-4 text-emerald-600" />
+              <span>Admin Moderation</span>
+              {pendingChargers.length > 0 && (
+                <span className="px-1.5 py-0.2 bg-amber-500 text-white rounded-full text-[10px] font-bold">
+                  {pendingChargers.length}
+                </span>
+              )}
+            </button>
+          )}
         </div>
       </div>
 
@@ -209,12 +224,12 @@ export const DashboardPage: React.FC = () => {
               <div>
                 <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Active Vehicle Profile</span>
                 <div className="text-base font-bold text-slate-900">
-                  {userProfile.vehicleMake} {userProfile.vehicleModel}
+                  {profile?.vehicle_make || userProfile.vehicleMake} {profile?.vehicle_model || userProfile.vehicleModel}
                 </div>
                 <div className="text-xs text-slate-500 flex items-center gap-2 mt-0.5 font-mono">
-                  <span>Reg: {userProfile.vehicleRegNumber}</span>
+                  <span>Reg: {profile?.vehicle_reg_number || userProfile.vehicleRegNumber}</span>
                   <span>•</span>
-                  <span>Battery: {userProfile.batteryCapacityKwh} kWh</span>
+                  <span>Battery: {profile?.battery_capacity_kwh ?? userProfile.batteryCapacityKwh} kWh</span>
                 </div>
               </div>
             </div>
@@ -591,7 +606,26 @@ export const DashboardPage: React.FC = () => {
       )}
 
       {/* ADMIN MODERATION TAB */}
-      {activeTab === 'moderation' && (
+      {activeTab === 'moderation' && !isAdmin && (
+        <div className="p-8 bg-white rounded-3xl border border-slate-200 text-center space-y-4 max-w-lg mx-auto my-8">
+          <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-700 flex items-center justify-center mx-auto border border-amber-200">
+            <Lock className="w-6 h-6" />
+          </div>
+          <h3 className="text-lg font-bold text-slate-900">Administrator Access Required</h3>
+          <p className="text-xs text-slate-500 leading-relaxed">
+            The Community Charger Moderation Console is strictly restricted to verified platform administrators. In accordance with safety rules, hosts cannot approve their own listings.
+          </p>
+          <button
+            type="button"
+            onClick={() => setActiveTab('driver')}
+            className="px-4 py-2 rounded-xl bg-forest-800 text-white text-xs font-semibold hover:bg-forest-900 transition"
+          >
+            Return to Driver Dashboard
+          </button>
+        </div>
+      )}
+
+      {activeTab === 'moderation' && isAdmin && (
         <div className="space-y-8 animate-fade-in">
           {/* Moderation Banner */}
           <div className="p-6 bg-slate-900 text-white rounded-3xl shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">

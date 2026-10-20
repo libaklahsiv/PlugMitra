@@ -87,9 +87,17 @@ export const Navbar: React.FC = () => {
                   className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-slate-200 hover:border-forest-300 bg-slate-50 hover:bg-forest-50/50 transition text-xs font-semibold text-slate-800"
                   title="View your profile"
                 >
-                  <div className="w-5 h-5 rounded-full bg-forest-800 text-white text-[10px] flex items-center justify-center font-bold">
-                    {(profile?.full_name || user.email || 'U')[0].toUpperCase()}
-                  </div>
+                  {user.user_metadata?.avatar_url || user.user_metadata?.picture ? (
+                    <img
+                      src={user.user_metadata.avatar_url || user.user_metadata.picture}
+                      alt="Avatar"
+                      className="w-5 h-5 rounded-full object-cover border border-forest-300"
+                    />
+                  ) : (
+                    <div className="w-5 h-5 rounded-full bg-forest-800 text-white text-[10px] flex items-center justify-center font-bold">
+                      {(profile?.full_name || user.email || 'U')[0].toUpperCase()}
+                    </div>
+                  )}
                   <span className="truncate max-w-[110px]">
                     {profile?.full_name || user.email?.split('@')[0]}
                   </span>

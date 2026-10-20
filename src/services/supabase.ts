@@ -128,31 +128,37 @@ export const supabase: SupabaseClient<Database> = (supabaseClient || (new Proxy(
         if (!inMemoryStore.has(tableName)) {
           inMemoryStore.set(tableName, []);
         }
-        return {
-          select: () => {
-            const getList = () => inMemoryStore.get(tableName) || [];
-            return {
-              eq: (_col: string, val: unknown) => ({
-                order: async () => ({
-                  data: getList().filter((r) => (r as Record<string, unknown>)[_col] === val),
-                  error: null
-                }),
-                single: async () => ({
-                  data: getList().find((r) => (r as Record<string, unknown>)[_col] === val) || null,
-                  error: null
-                }),
-                then: (resolve: (val: unknown) => unknown) =>
-                  Promise.resolve({
-                    data: getList().filter((r) => (r as Record<string, unknown>)[_col] === val),
-                    error: null
-                  }).then(resolve),
-              }),
-              order: async () => ({ data: getList(), error: null }),
-              single: async () => ({ data: getList()[0] || null, error: null }),
+
+        // Fluent query builder supporting any depth of .select().eq().eq().order().single()
+        const createQueryBuilder = (filters: Array<{ col: string; val: unknown }> = []) => {
+          const execute = () => {
+            let list = [...(inMemoryStore.get(tableName) || [])];
+            for (const f of filters) {
+              list = list.filter((r) => (r as Record<string, unknown>)[f.col] === f.val);
+            }
+            return list;
+          };
+
+          const builder: Record<string, unknown> = {
+            select: () => createQueryBuilder(filters),
+            eq: (col: string, val: unknown) => createQueryBuilder([...filters, { col, val }]),
+            order: () => ({
+              ...builder,
+              single: async () => ({ data: execute()[0] || null, error: null }),
               then: (resolve: (val: unknown) => unknown) =>
-                Promise.resolve({ data: getList(), error: null }).then(resolve),
-            };
-          },
+                Promise.resolve({ data: execute(), error: null }).then(resolve),
+            }),
+            limit: () => builder,
+            single: async () => ({ data: execute()[0] || null, error: null }),
+            then: (resolve: (val: unknown) => unknown) =>
+              Promise.resolve({ data: execute(), error: null }).then(resolve),
+          };
+
+          return builder;
+        };
+
+        return {
+          select: () => createQueryBuilder([]),
           insert: (records: Record<string, unknown>[] | Record<string, unknown>) => {
             if (isProd) {
               const err = new Error(`Production database is not configured. Cannot persist record to table "${tableName}".`);
