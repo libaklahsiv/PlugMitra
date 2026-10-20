@@ -1,0 +1,537 @@
+import React, { useState, useEffect } from 'react';
+import { Link } from 'react-router-dom';
+import {
+  LayoutDashboard,
+  Bookmark,
+  Calendar,
+  Zap,
+  Building,
+  PlusCircle,
+  Clock,
+  MapPin,
+  Power,
+  Trash2,
+  ArrowRight,
+  Car
+} from 'lucide-react';
+import { StorageService } from '../services/storage';
+import { ChargerService } from '../services/chargerService';
+import { useAuth } from '../context/AuthContext';
+import { Charger, BookingRequest, UserProfile } from '../types/charger';
+import { ChargerDetailsModal } from '../components/ChargerDetailsModal';
+
+export const DashboardPage: React.FC = () => {
+  const [activeTab, setActiveTab] = useState<'driver' | 'host'>('driver');
+  const { user, profile, isAdmin, openAuthModal } = useAuth();
+
+  const [savedChargers, setSavedChargers] = useState<Charger[]>([]);
+  const [hostListings, setHostListings] = useState<Charger[]>([]);
+  const [bookings, setBookings] = useState<BookingRequest[]>([]);
+  const [userProfile, setUserProfile] = useState<UserProfile>(StorageService.getUserProfile());
+
+  const [selectedChargerForModal, setSelectedChargerForModal] = useState<Charger | null>(null);
+  const [deleteConfirmationId, setDeleteConfirmationId] = useState<string | null>(null);
+
+  const loadData = async () => {
+    setSavedChargers(StorageService.getSavedChargers());
+    const userChargers = await ChargerService.getUserChargers(user);
+    setHostListings(userChargers);
+    setBookings(StorageService.getBookings());
+    setUserProfile(StorageService.getUserProfile());
+  };
+
+  useEffect(() => {
+    loadData();
+  }, [user]);
+
+  const handleToggleActive = (id: string, current: boolean) => {
+    StorageService.updateChargerStatus(id, !current);
+    loadData();
+  };
+
+  const handleDeleteListing = (id: string) => {
+    StorageService.deleteCharger(id);
+    setDeleteConfirmationId(null);
+    loadData();
+  };
+
+  const handleBookingStatusChange = (id: string, status: BookingRequest['status']) => {
+    StorageService.updateBookingStatus(id, status);
+    loadData();
+  };
+
+  const handleRemoveSaved = (id: string) => {
+    StorageService.toggleSave(id);
+    loadData();
+  };
+  return (
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
+      {/* Page Title & Top Selector */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+        <div>
+          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-forest-50 text-forest-800 text-xs font-semibold mb-2 border border-forest-200">
+            <LayoutDashboard className="w-3.5 h-3.5 text-forest-700" />
+            <span>Chennai EV Management Console</span>
+          </div>
+          <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 tracking-tight">
+            My PlugMitra Dashboard
+          </h1>
+          <p className="text-xs sm:text-sm text-slate-500 mt-0.5">
+            Manage your saved charging points, driver booking requests, and host parking slot listings.
+          </p>
+        </div>
+
+        {/* Tab Toggle: Driver Mode vs Host Mode */}
+        <div className="inline-flex rounded-2xl bg-slate-100 p-1 border border-slate-200 self-start sm:self-auto text-xs font-bold shadow-2xs">
+          <button
+            type="button"
+            onClick={() => setActiveTab('driver')}
+            className={`px-4 py-2 rounded-xl transition flex items-center gap-2 ${
+              activeTab === 'driver'
+                ? 'bg-white text-forest-900 shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Car className="w-4 h-4 text-forest-700" />
+            <span>Driver Dashboard</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab('host')}
+            className={`px-4 py-2 rounded-xl transition flex items-center gap-2 ${
+              activeTab === 'host'
+                ? 'bg-white text-forest-900 shadow-xs'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Building className="w-4 h-4 text-forest-700" />
+            <span>Host / Owner Dashboard</span>
+          </button>
+        </div>
+      </div>
+
+      {/* DRIVER DASHBOARD TAB */}
+      {activeTab === 'driver' && (
+        <div className="space-y-8 animate-fade-in">
+          {/* Driver Vehicle Preference Card */}
+          <div className="p-5 bg-white rounded-3xl border border-slate-200/90 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-forest-50 text-forest-800 flex items-center justify-center shrink-0 border border-forest-200">
+                <Car className="w-6 h-6" />
+              </div>
+              <div>
+                <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider">Active Vehicle Profile</span>
+                <div className="text-base font-bold text-slate-900">
+                  {userProfile.vehicleMake} {userProfile.vehicleModel}
+                </div>
+                <div className="text-xs text-slate-500 flex items-center gap-2 mt-0.5 font-mono">
+                  <span>Reg: {userProfile.vehicleRegNumber}</span>
+                  <span>•</span>
+                  <span>Battery: {userProfile.batteryCapacityKwh} kWh</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <Link
+                to="/profile"
+                className="px-4 py-2 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition"
+              >
+                Edit Vehicle Preferences
+              </Link>
+              <Link
+                to="/explore"
+                className="px-4 py-2 rounded-xl bg-forest-800 hover:bg-forest-900 text-white text-xs font-semibold transition"
+              >
+                Find Nearby Chargers
+              </Link>
+            </div>
+          </div>
+
+          {/* Section: Booking Requests */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                  <Calendar className="w-5 h-5 text-forest-700" />
+                  Charging Slot Booking Requests
+                </h2>
+                <p className="text-xs text-slate-500">
+                  Track time slots requested at residential or commercial charging bays.
+                </p>
+              </div>
+              <span className="text-xs font-medium bg-amber-50 text-amber-900 border border-amber-200 px-2.5 py-1 rounded-full">
+                Demo state: backend pending
+              </span>
+            </div>
+
+            {bookings.length === 0 ? (
+              <div className="p-8 bg-white rounded-3xl border border-slate-200 text-center space-y-2">
+                <Clock className="w-8 h-8 text-slate-300 mx-auto" />
+                <p className="font-semibold text-slate-700 text-sm">No Active Booking Requests</p>
+                <p className="text-xs text-slate-500">
+                  Select a charger from Explore Chargers to request a designated parking slot.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {bookings.map((b) => (
+                  <div
+                    key={b.id}
+                    className="p-5 bg-white rounded-2xl border border-slate-200 shadow-2xs space-y-3"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-forest-800 bg-forest-50 px-2 py-0.5 rounded border border-forest-200">
+                          {b.chargerArea}
+                        </span>
+                        <h3 className="font-bold text-slate-900 text-sm mt-1">{b.chargerTitle}</h3>
+                        <p className="text-xs font-mono text-slate-600">Parking Slot: {b.parkingSlotNumber}</p>
+                      </div>
+
+                      <span
+                        className={`px-2.5 py-1 rounded-full text-[11px] font-bold ${
+                          b.status === 'Confirmed'
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : b.status === 'Pending Host Approval'
+                            ? 'bg-amber-100 text-amber-800'
+                            : 'bg-slate-100 text-slate-600'
+                        }`}
+                      >
+                        {b.status}
+                      </span>
+                    </div>
+
+                    <div className="p-3 bg-slate-50 rounded-xl border border-slate-100 text-xs space-y-1">
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Date:</span>
+                        <span className="font-semibold text-slate-800">{b.requestedDate}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Window:</span>
+                        <span className="font-semibold text-slate-800">{b.requestedTimeSlot}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span className="text-slate-500">Vehicle:</span>
+                        <span className="font-mono text-slate-800">{b.vehicleModel} ({b.vehicleNumber})</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-2 border-t border-slate-100 text-xs">
+                      {b.isDemo && (
+                        <span className="text-[10px] text-slate-400 italic">Sample booking record</span>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleBookingStatusChange(b.id, 'Completed')}
+                        className="text-xs text-forest-800 hover:text-forest-950 font-bold ml-auto"
+                      >
+                        Mark as Completed
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Section: Saved Chargers */}
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                  <Bookmark className="w-5 h-5 text-forest-700" />
+                  Saved Charging Locations ({savedChargers.length})
+                </h2>
+                <p className="text-xs text-slate-500">
+                  Quick access to your preferred neighborhood charging bays in Chennai.
+                </p>
+              </div>
+            </div>
+
+            {savedChargers.length === 0 ? (
+              <div className="p-8 bg-white rounded-3xl border border-slate-200 text-center space-y-3">
+                <Bookmark className="w-8 h-8 text-slate-300 mx-auto" />
+                <p className="font-semibold text-slate-700 text-sm">No Saved Chargers Yet</p>
+                <p className="text-xs text-slate-500">
+                  Tap the bookmark icon on any charger card in the Explore page to pin it here.
+                </p>
+                <Link
+                  to="/explore"
+                  className="inline-block px-4 py-2 rounded-xl bg-forest-800 text-white text-xs font-semibold"
+                >
+                  Explore Chargers
+                </Link>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {savedChargers.map((ch) => (
+                  <div
+                    key={ch.id}
+                    className="p-4 bg-white rounded-2xl border border-slate-200 shadow-2xs space-y-3 flex flex-col justify-between"
+                  >
+                    <div>
+                      <div className="flex items-center justify-between text-xs text-slate-500 mb-1">
+                        <span className="font-bold text-forest-800 flex items-center gap-1">
+                          <MapPin className="w-3.5 h-3.5 text-forest-700" />
+                          {ch.area}
+                        </span>
+                        <span className="font-mono font-bold text-slate-900 bg-slate-100 px-1.5 py-0.5 rounded">
+                          {ch.powerOutputKw} kW
+                        </span>
+                      </div>
+                      <h4 className="font-bold text-slate-900 text-sm leading-snug">{ch.title}</h4>
+                      <p className="text-xs font-mono text-slate-600 mt-1">Slot: {ch.parkingSlotNumber}</p>
+                      <p className="text-xs text-slate-500 mt-1">
+                        Tariff: {ch.pricePerKwh ? `₹${ch.pricePerKwh}/kWh` : 'Not specified'}
+                      </p>
+                    </div>
+
+                    <div className="pt-3 border-t border-slate-100 flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedChargerForModal(ch)}
+                        className="text-xs font-bold text-forest-800 hover:text-forest-950 flex items-center gap-1"
+                      >
+                        <span>View Details</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveSaved(ch.id)}
+                        className="text-xs text-rose-600 hover:text-rose-800"
+                        title="Remove from saved"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* HOST / OWNER DASHBOARD TAB */}
+      {activeTab === 'host' && (
+        <div className="space-y-8 animate-fade-in">
+          {/* Host Summary Bar */}
+          <div className="p-6 bg-forest-900 text-white rounded-3xl shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+              <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-300">
+                Chennai Host Portal
+              </span>
+              <h2 className="text-xl font-bold mt-0.5">
+                Manage Your Charging Points & Parking Slots
+              </h2>
+              <p className="text-xs text-slate-300 mt-1 max-w-xl">
+                Keep your parking slot number, socket availability, and operating hours up to date for Chennai EV owners.
+              </p>
+            </div>
+
+            <Link
+              to="/add-charger"
+              className="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-600 text-forest-950 font-bold text-xs transition flex items-center gap-2 self-start md:self-auto shadow-xs"
+            >
+              <PlusCircle className="w-4 h-4" />
+              <span>List Another Charger</span>
+            </Link>
+          </div>
+
+          {/* Host Listings */}
+          <div className="space-y-4">
+            <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+              <Building className="w-5 h-5 text-forest-700" />
+              Your Registered Charging Locations ({hostListings.length})
+            </h3>
+
+            {hostListings.length === 0 ? (
+              <div className="p-8 bg-white rounded-3xl border border-slate-200 text-center space-y-3">
+                <Zap className="w-8 h-8 text-slate-300 mx-auto" />
+                <p className="font-semibold text-slate-700 text-sm">No Listings Found</p>
+                <p className="text-xs text-slate-500">
+                  Register your residential driveway, parking bay, or commercial socket to start welcoming drivers.
+                </p>
+                <Link
+                  to="/add-charger"
+                  className="inline-block px-5 py-2.5 rounded-xl bg-forest-800 text-white text-xs font-bold"
+                >
+                  List a Charger Now
+                </Link>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {hostListings.map((ch) => (
+                  <div
+                    key={ch.id}
+                    className="p-5 bg-white rounded-3xl border border-slate-200 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-4"
+                  >
+                    <div className="space-y-1.5 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-forest-800 bg-forest-50 px-2 py-0.5 rounded border border-forest-200">
+                          {ch.area}
+                        </span>
+                        <span
+                          className={`text-[10px] font-semibold px-2 py-0.5 rounded-full ${
+                            ch.isActive
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-slate-100 text-slate-600'
+                          }`}
+                        >
+                          {ch.isActive ? 'Active & Discoverable' : 'Temporarily Inactive'}
+                        </span>
+                        <span className="text-[10px] text-slate-500 bg-slate-50 px-2 py-0.5 rounded border border-slate-200">
+                          Status: {ch.verificationStatus}
+                        </span>
+                      </div>
+
+                      <h4 className="font-bold text-base text-slate-900">{ch.title}</h4>
+                      <p className="text-xs text-slate-600">
+                        Property: <span className="font-semibold">{ch.propertyName}</span> · Parking Slot:{' '}
+                        <span className="font-mono font-bold text-forest-900 bg-forest-50 px-1.5 py-0.5 rounded border border-forest-200">
+                          {ch.parkingSlotNumber}
+                        </span>
+                      </p>
+
+                      <div className="text-xs text-slate-500 flex flex-wrap gap-3 font-mono pt-1">
+                        <span>{ch.powerOutputKw} kW ({ch.powerType})</span>
+                        <span>•</span>
+                        <span>{ch.pricePerKwh ? `₹${ch.pricePerKwh}/kWh` : 'No tariff set'}</span>
+                        <span>•</span>
+                        <span>{ch.latitude.toFixed(4)}°N, {ch.longitude.toFixed(4)}°E</span>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2 shrink-0 pt-3 md:pt-0 border-t md:border-t-0 border-slate-100">
+                      <button
+                        type="button"
+                        onClick={() => handleToggleActive(ch.id, ch.isActive)}
+                        className={`px-3 py-2 rounded-xl text-xs font-semibold border flex items-center gap-1.5 transition ${
+                          ch.isActive
+                            ? 'bg-white text-slate-700 hover:bg-slate-50 border-slate-200'
+                            : 'bg-emerald-50 text-emerald-800 border-emerald-300 font-bold'
+                        }`}
+                      >
+                        <Power className="w-3.5 h-3.5" />
+                        <span>{ch.isActive ? 'Pause Listing' : 'Activate'}</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setSelectedChargerForModal(ch)}
+                        className="px-3.5 py-2 rounded-xl bg-forest-800 hover:bg-forest-900 text-white text-xs font-semibold transition"
+                      >
+                        Preview Listing
+                      </button>
+
+                      {ch.isUserCreated && (
+                        <button
+                          type="button"
+                          onClick={() => setDeleteConfirmationId(ch.id)}
+                          className="p-2 rounded-xl text-rose-600 hover:bg-rose-50 transition border border-rose-200"
+                          title="Delete listing"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Host Incoming Driver Booking Requests Simulation */}
+          <div className="p-6 bg-slate-50 rounded-3xl border border-slate-200 space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <h4 className="font-bold text-slate-900 text-sm flex items-center gap-2">
+                  <Calendar className="w-4 h-4 text-forest-700" />
+                  Incoming Driver Booking Inquiries
+                </h4>
+                <p className="text-xs text-slate-500">
+                  Driver requests sent to your listed slots across Chennai.
+                </p>
+              </div>
+              <span className="text-[11px] font-bold text-slate-500 bg-white border border-slate-200 px-2 py-0.5 rounded-full">
+                Demo state: backend pending
+              </span>
+            </div>
+
+            <div className="p-4 bg-white rounded-2xl border border-slate-200 text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <div className="font-bold text-slate-900">
+                  Sanjay Kumar · Tata Nexon EV (TN 09 BK 2244)
+                </div>
+                <div className="text-slate-500 mt-0.5">
+                  Requested 2 hours on tomorrow morning (09:00 AM) for Slot P-04.
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => alert('Demo action: In a production deployment, this triggers an SMS/WhatsApp confirmation to the driver.')}
+                  className="px-3 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs"
+                >
+                  Approve Slot
+                </button>
+                <button
+                  type="button"
+                  onClick={() => alert('Demo action: Driver will be notified the slot is occupied.')}
+                  className="px-3 py-1.5 rounded-xl border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs font-semibold"
+                >
+                  Decline
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DELETE CONFIRMATION MODAL */}
+      {deleteConfirmationId && (
+        <div
+          className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-xs flex items-center justify-center p-4"
+          onClick={() => setDeleteConfirmationId(null)}
+        >
+          <div
+            className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl border border-slate-200 space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-10 h-10 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center">
+              <Trash2 className="w-5 h-5" />
+            </div>
+            <h4 className="font-bold text-slate-900 text-base">Remove Charger Listing?</h4>
+            <p className="text-xs text-slate-600">
+              This will remove this parking slot and charger from the local Chennai map. This action cannot be undone.
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <button
+                type="button"
+                onClick={() => setDeleteConfirmationId(null)}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-100 rounded-xl"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDeleteListing(deleteConfirmationId)}
+                className="px-4 py-2 text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-xs"
+              >
+                Confirm Delete
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL PREVIEW */}
+      <ChargerDetailsModal
+        charger={selectedChargerForModal}
+        onClose={() => setSelectedChargerForModal(null)}
+      />
+    </div>
+  );
+};
